@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -67,6 +68,11 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var lastSyncedItem: ClipItem? = null
 
     private lateinit var statusText: TextView
+    private lateinit var shareImages: CheckBox
+    private val clipPrefs by lazy { getSharedPreferences("clip_settings", Context.MODE_PRIVATE) }
+
+    /** Opt-in: local clipboard images are never pushed without this checkbox (R1). */
+    @Volatile private var shareImagesEnabled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +80,13 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         findViewById<Button>(R.id.remoteButton).setOnClickListener {
             startActivity(Intent(this, RemoteControlActivity::class.java))
+        }
+        shareImages = findViewById(R.id.cbShareImages)
+        shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
+        shareImages.isChecked = shareImagesEnabled
+        shareImages.setOnCheckedChangeListener { _, checked ->
+            shareImagesEnabled = checked
+            clipPrefs.edit().putBoolean("share_images", checked).apply()
         }
         maybeRequestStoragePermission()
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -169,9 +182,15 @@ class MainActivity : AppCompatActivity() {
         try {
             val local = readLocalClip()
             if (local != null && local != lastSyncedItem) {
-                push(url, local)
-                lastSyncedItem = local
-                return
+                if (local.isImage && !shareImagesEnabled) {
+                    // Pin the content without sending it: the server is
+                    // discovered unauthenticated, so image push is opt-in.
+                    lastSyncedItem = local
+                } else {
+                    push(url, local)
+                    lastSyncedItem = local
+                    return
+                }
             }
             val remote = fetchRemoteClip(url)
             if (remote != null && remote != lastSyncedItem) {
@@ -244,7 +263,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun fetchRemoteClip(url: String): ClipItem? {
-        getImage(url)?.let { if (it.isNotEmpty()) return ClipItem(true, null, it) }
+        if (shareImagesEnabled) {
+            getImage(url)?.let { if (it.isNotEmpty()) return ClipItem(true, null, it) }
+        }
         val text = getText(url)
         if (!text.isNullOrEmpty()) return ClipItem(false, text, null)
         return null

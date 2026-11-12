@@ -120,6 +120,9 @@ class TouchpadView @JvmOverloads constructor(
                     lastY = y
                     if (dx != 0f || dy != 0f) {
                         listener?.onMove(dx.toInt(), dy.toInt())
+                        // One finger still moving after a two-finger gesture is
+                        // not a stationary two-finger tap.
+                        if (gestureWasTwo) twoFingerMove += abs(dx) + abs(dy)
                     }
                     totalMove += abs(dx) + abs(dy)
                     if (totalMove > slop) removeCallbacks(longPressRunnable)
@@ -130,9 +133,6 @@ class TouchpadView @JvmOverloads constructor(
                 activeCount = event.pointerCount - 1
                 if (activeCount < 2) {
                     twoFinger = false
-                    // The remaining finger continues; keep it out of the tap
-                    // logic so lifting a scroll gesture never clicks.
-                    consumed = true
                     val remIdx = if (event.actionIndex == 0) 1 else 0
                     if (remIdx < event.pointerCount) {
                         primaryId = event.getPointerId(remIdx)

@@ -22,13 +22,25 @@ WebSocket para eventos de input.
 ## Pairing (emparejamiento)
 
 1. El server imprime en consola un **Pairing PIN** de 6 dígitos al arrancar.
-2. En Control remoto se ingresa el PIN y se toca **Emparejar**: se obtiene un
-   token de sesión que queda guardado en la app.
+2. En Control remoto se ingresa el PIN y se toca **Emparejar**: la app muestra
+   a qué host se va a enviar (la red no está cifrada) y exige una segunda
+   confirmación. Se obtiene un token de sesión que queda guardado en la app.
 3. La conexión WebSocket (`/ws/input?token=...`) abre el stream de eventos.
    Si el server rechaza el token (PIN rotado por intentos fallidos, server
    reiniciado), la app vuelve a pedir el PIN.
 
 Tras 5 PINs incorrectos seguidos el server rota el PIN e imprime uno nuevo.
+
+## Soltar (desconexión de emergencia)
+
+**Soltar** corta la sesión de input y **no** reconecta sola: hay que tocar
+**Conectar** (o volver a entrar en la pantalla) para reanudar.
+
+## Sincronización de imágenes
+
+El push/pull de imágenes del clipboard es **opt-in** con el checkbox
+"Sincronizar imágenes" (desactivado por defecto): el descubrimiento mDNS no
+está autenticado y no se envían imágenes locales a un server sin confirmar.
 
 ## Build
 

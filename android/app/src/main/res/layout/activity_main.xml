@@ -12,6 +12,13 @@
         android:text="Buscando servidor..."
         android:textSize="16sp" />
 
+    <CheckBox
+        android:id="@+id/cbShareImages"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Sincronizar imágenes del clipboard" />
+
     <Button
         android:id="@+id/remoteButton"
         android:layout_width="match_parent"

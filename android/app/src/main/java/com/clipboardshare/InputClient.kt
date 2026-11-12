@@ -92,8 +92,17 @@ class InputClient(
                 .put("mods", JSONArray(mods))
         )
 
-    fun sendText(chars: String): Boolean =
-        send(JSONObject().put("type", "text").put("chars", chars.take(1000)))
+    /**
+     * Sends unicode text (S6). Rejects — never silently truncates — strings
+     * over 1000 code points or with control characters, so callers only
+     * clear their input on a real send.
+     */
+    fun sendText(chars: String): Boolean {
+        if (chars.isEmpty()) return false
+        if (chars.any { it.code < 0x20 || it.code == 0x7f }) return false
+        if (Character.codePointCount(chars, 0, chars.length) > 1000) return false
+        return send(JSONObject().put("type", "text").put("chars", chars))
+    }
 
     private fun send(event: JSONObject): Boolean = ws?.send(event.toString()) ?: false
 

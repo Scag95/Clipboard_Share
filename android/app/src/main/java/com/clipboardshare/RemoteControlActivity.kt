@@ -22,6 +22,8 @@ class RemoteControlActivity : AppCompatActivity() {
     private val client = InputClient()
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var store: SessionStore
+    @Volatile private var manualDisconnect = false
+    private var pendingPairConfirmUrl: String? = null
 
     private lateinit var statusText: TextView
     private lateinit var pinInput: EditText
@@ -37,7 +39,10 @@ class RemoteControlActivity : AppCompatActivity() {
             runOnUiThread {
                 if (reason == "unauthorized") {
                     store.token = null
+                    pendingPairConfirmUrl = null
                     setStatus("Sesión expirada: ingresá de nuevo el PIN del server")
+                } else if (manualDisconnect) {
+                    setStatus("Desconectado (a mano)")
                 } else {
                     setStatus("Desconectado: $reason")
                     scheduleRetry()
@@ -84,16 +89,25 @@ class RemoteControlActivity : AppCompatActivity() {
 
         bind(R.id.btnSendText) {
             val chars = textInput.text.toString()
-            if (chars.isNotEmpty() && !client.sendText(chars)) {
-                setStatus("Sin conexión: el texto no se envió")
-            } else {
-                textInput.setText("")
+            when {
+                chars.isEmpty() -> setStatus("Nada que enviar")
+                !client.sendText(chars) -> setStatus(
+                    if (client.connected) {
+                        "Texto demasiado largo o con caracteres de control: no se envió"
+                    } else {
+                        "Sin conexión: el texto no se envió"
+                    }
+                )
+                else -> textInput.setText("")
             }
         }
 
         bind(R.id.btnPair) { startPairing() }
         bind(R.id.btnConnect) { connect() }
         bind(R.id.btnDisconnect) {
+            manualDisconnect = true
+            handler.removeCallbacksAndMessages(null)
+            retryScheduled = false
             client.disconnect()
             setStatus("Desconectado (a mano)")
         }
@@ -115,6 +129,7 @@ class RemoteControlActivity : AppCompatActivity() {
     }
 
     private fun connect() {
+        manualDisconnect = false
         val token = store.token
         if (token == null) {
             setStatus("Ingresá el PIN que muestra el server y tocá Emparejar")
@@ -154,6 +169,14 @@ class RemoteControlActivity : AppCompatActivity() {
             setStatus("El PIN son 6 dígitos")
             return
         }
+        // HTTP is unauthenticated on the LAN: show which host receives the PIN
+        // and require a second explicit tap before sending it.
+        if (pendingPairConfirmUrl != url) {
+            pendingPairConfirmUrl = url
+            setStatus("Confirmá: tocá Emparejar de nuevo para enviar el PIN a $url")
+            return
+        }
+        pendingPairConfirmUrl = null
         setStatus("Emparejando...")
         lifecycleScope.launch(Dispatchers.IO) {
             val token = PairingClient.pair(url, pin)
