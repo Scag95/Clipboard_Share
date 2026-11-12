@@ -4,10 +4,12 @@ Documento para retomar el trabajo en otro equipo/entorno.
 
 ## Estado actual (main)
 
-- Servidor Go funcional: clipboard real de Windows (texto + imagen), mDNS announce
-  (`_clipboard-share._tcp`), HTTP API en `:8765`.
-- Cliente Android: descubrimiento mDNS (NSD) + sincronización de texto e imágenes
-  (PNG) bidireccional.
+- Servidor Go: clipboard real de Windows (texto + imagen), mDNS announce
+  (`_clipboard-share._tcp`), HTTP API en `:8765`, apagado ordenado, límite de
+  imagen de 10 MiB (413) y `ErrNoData` mapeado a respuestas vacías (204 / "").
+- Cliente Android: descubrimiento NSD + sync bidireccional de texto e imagen
+  (PNG) con `OnPrimaryClipChangedListener` y polling cada 2 s.
+- Tests Go: handlers de `internal/api` con store inyectable.
 - Repo: https://github.com/Scag95/Clipboard_Share (rama `main`).
 
 ## Pendientes / siguientes pasos
@@ -24,8 +26,11 @@ Documento para retomar el trabajo en otro equipo/entorno.
   en el clipboard sin interacción del usuario.
 
 ### 3. Tests
-- Go: tests unitarios para los handlers HTTP (`internal/api`).
+- Go: tests unitarios para los handlers HTTP (`internal/api`). ✅ Hecho.
+- Go: tests de `internal/clipboard` y `internal/discovery` (requieren seam de
+  inyección o entorno real).
 - Android: tests de descubrimiento y sync (Robolectric o instrumentados).
+  Pendiente: el proyecto aún no tiene ni `androidTest/` ni `test/`.
 
 ### 4. Empaquetado
 - Generar APK release firmado (`./gradlew assembleRelease`).
@@ -33,9 +38,12 @@ Documento para retomar el trabajo en otro equipo/entorno.
 - Documentar en README los pasos de build release.
 
 ### 5. Seguridad / robustez
-- Autenticación simple (token compartido) entre PC y móvil.
-- Validar tamaño máximo de imagen.
-- Manejo de errores de red y reconexión automática.
+- Autenticación simple (token compartido) entre PC y móvil. Pendiente.
+- Validar tamaño máximo de imagen. ✅ Hecho (10 MiB, responde 413).
+- Manejo de errores de red y reconexión automática: el polling de Android ya
+  reintenta solo; falta backoff y notificación de estado.
+- El server no usa `http.MaxBytesReader` (el límite actual lee con
+  `io.LimitReader`, que no cierra la conexión early). Menor.
 
 ### 6. Mejoras de UX
 - Notificación de estado de conexión.
@@ -57,4 +65,3 @@ Documento para retomar el trabajo en otro equipo/entorno.
 - Endpoints: `GET/POST /clipboard/text`, `GET/POST /clipboard/image`, `GET /health`.
 - Firewall de Windows debe permitir el puerto 8765.
 - PC y móvil deben estar en la misma LAN para mDNS.
-EOF

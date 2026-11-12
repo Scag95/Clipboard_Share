@@ -68,10 +68,11 @@ anuncia en la red local como `_clipboard-share._tcp`.
 Endpoints:
 
 - `GET  /health` — estado del servidor.
-- `GET  /clipboard/text` — texto actual del clipboard.
+- `GET  /clipboard/text` — texto actual del clipboard (`{"text":""}` si no hay texto).
 - `POST /clipboard/text` — escribe texto al clipboard (`{"text":"..."}`).
-- `GET  /clipboard/image` — imagen actual del clipboard (PNG).
-- `POST /clipboard/image` — escribe imagen al clipboard (body binario).
+- `GET  /clipboard/image` — imagen actual del clipboard (PNG); `204` si no hay imagen.
+- `POST /clipboard/image` — escribe imagen al clipboard (body binario PNG).
+  Tamaño máximo: 10 MiB; si se excede responde `413` sin tocar el clipboard.
 
 ## Generar binario
 
@@ -81,6 +82,8 @@ go build -o clipboard-share.exe ./cmd/server
 
 ## Estado del proyecto
 
-- Servidor Go funcional con clipboard real de Windows (texto + imagen).
-- Cliente Android: descubrimiento mDNS (NSD) + sincronizacion de texto e imagenes (PNG).
-EOF
+- Servidor Go con clipboard real de Windows (texto + imagen), apagado ordenado
+  (graceful shutdown) y límites de tamaño en la API.
+- Cliente Android: descubrimiento mDNS (NSD), sincronización bidireccional de
+  texto e imágenes (PNG) con listener del clipboard y polling cada 2 s.
+- Tests: handlers HTTP del server (`internal/api`).

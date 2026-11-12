@@ -1,12 +1,14 @@
 package main
 
 import (
-	"fmt"
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"clipboard-share/internal/api"
 	"clipboard-share/internal/clipboard"
@@ -23,24 +25,47 @@ func main() {
 		log.Fatalf("clipboard init failed: %v", err)
 	}
 
-	if err := discovery.Announce("clipboard-share", port); err != nil {
+	stopAnnounce, err := discovery.Announce("clipboard-share", port)
+	if err != nil {
 		log.Printf("warning: mDNS announce failed: %v", err)
+	} else {
+		defer stopAnnounce()
 	}
 
-	r := api.NewRouter()
+	r := api.NewRouter(clipboardStore{})
 	addr := ":" + port
-	log.Printf("Clipboard Share server listening on %s", addr)
-
 	srv := &http.Server{Addr: addr, Handler: r}
+
+	serveErr := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatal(err)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
 		}
 	}()
+	log.Printf("Clipboard Share server listening on %s", addr)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	fmt.Println("shutting down...")
-	_ = srv.Close()
+	select {
+	case err := <-serveErr:
+		log.Fatalf("server failed: %v", err)
+	case <-sig:
+		log.Println("shutting down...")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("graceful shutdown failed: %v", err)
+	}
+}
+
+// clipboardStore adapts the package-level clipboard API to api.Store.
+type clipboardStore struct{}
+
+func (clipboardStore) GetText() (string, error)  { return clipboard.GetText() }
+func (clipboardStore) SetText(text string) error { return clipboard.SetText(text) }
+func (clipboardStore) GetImage() ([]byte, error) { return clipboard.GetImage() }
+func (clipboardStore) SetImage(data []byte) error {
+	return clipboard.SetImage(data)
 }

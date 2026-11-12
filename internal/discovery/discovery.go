@@ -2,36 +2,23 @@ package discovery
 
 import (
 	"log"
+	"strconv"
 
 	"github.com/grandcat/zeroconf"
 )
 
-// Announce publica el servicio mDNS en la LAN para que los clientes lo descubran.
-func Announce(name, port string) error {
-	server, err := zeroconf.Register(name, "_clipboard-share._tcp", "local.", mustAtoi(port), []string{"version=1"}, nil)
+// Announce publishes the mDNS service on the LAN so clients can discover it.
+// The returned function shuts the announcement down; callers must invoke it on
+// exit so the record is withdrawn and the registration goroutine stops.
+func Announce(name, port string) (shutdown func(), err error) {
+	p, err := strconv.Atoi(port)
+	if err != nil || p <= 0 || p > 65535 {
+		return nil, &strconv.NumError{Func: "Atoi", Num: port, Err: strconv.ErrRange}
+	}
+	server, err := zeroconf.Register(name, "_clipboard-share._tcp", "local.", p, []string{"version=1"}, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	log.Printf("mDNS: announced %s on port %s", name, port)
-	// Mantener el registro vivo mientras el proceso corra; se cierra al salir.
-	go func() {
-		<-make(chan struct{})
-		server.Shutdown()
-	}()
-	return nil
+	return func() { server.Shutdown() }, nil
 }
-
-func mustAtoi(s string) int {
-	n := 0
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			log.Fatalf("invalid port: %s", s)
-		}
-		n = n*10 + int(c-'0')
-	}
-	if n == 0 {
-		log.Fatalf("invalid port: %s", s)
-	}
-	return n
-}
-
