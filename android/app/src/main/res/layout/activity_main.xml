@@ -11,4 +11,11 @@
         android:layout_height="wrap_content"
         android:text="Buscando servidor..."
         android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/remoteButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Control remoto (mouse y teclado)" />
 </LinearLayout>

@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -14,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
+import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -70,6 +72,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         statusText = findViewById(R.id.statusText)
+        findViewById<Button>(R.id.remoteButton).setOnClickListener {
+            startActivity(Intent(this, RemoteControlActivity::class.java))
+        }
         maybeRequestStoragePermission()
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
         startDiscovery()
@@ -106,6 +111,7 @@ class MainActivity : AppCompatActivity() {
                             val host = si.host?.hostAddress ?: return
                             val port = si.port
                             serviceUrl = "http://$host:$port"
+                            ServerRepo.url = serviceUrl
                             Log.d(TAG, "Resolved: $serviceUrl")
                             runOnUiThread { statusText.text = "Conectado a $serviceUrl" }
                         }
@@ -116,6 +122,7 @@ class MainActivity : AppCompatActivity() {
             override fun onServiceLost(service: NsdServiceInfo) {
                 Log.d(TAG, "Service lost: ${service.serviceName}")
                 serviceUrl = null
+                ServerRepo.url = null
                 runOnUiThread { statusText.text = "Desconectado" }
             }
 

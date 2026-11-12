@@ -49,8 +49,8 @@ PIN pairing auth, separate Android screen. Clipboard sync stays as-is.
 | T1 | S4 | parent inline: `internal/pair` PIN/token store + tests | `71a7de7` |
 | T2 | S6, S7 | parent inline: `internal/input` events, Injector, stub + Windows SendInput + tests | `1b307e4` |
 | T3 | S3, S4, S6 | parent inline: WebSocket `/ws/input` handler with token gate + rate clamp + tests | `1980e0f` |
-| T4 | S1, S4 | parent inline: wire `cmd/server/main.go`, deps, README + PLAN updates | — |
-| T5 | S3, S4 | parent inline: Android OkHttp WS client + pairing flow (PIN entry, token persistence) | — |
+| T4 | S1, S4 | parent inline: wire `cmd/server/main.go`, deps, README + PLAN updates | `a543431` |
+| T5 | S3, S4 | parent inline: Android OkHttp WS client + pairing flow (PIN entry, token persistence) | `e272e68` |
 | T6 | S2, S5 | parent inline: Android `RemoteControlActivity` touchpad + text/shortcuts, manifest, entry point | — |
 
 ## Log
@@ -71,3 +71,14 @@ PIN pairing auth, separate Android screen. Clipboard sync stays as-is.
   Windows and its SyscallN differs, so the Windows path uses the standard
   `syscall` package instead. Contract preserved: SendInput, no cgo, build-tag
   isolated, Linux unaffected.
+- L6 — Delivery strategy for accumulated slices: reviewable work-unit commits
+  on `feat/input-control` (real branch lines: T1 378, T2 ~550, T3 ~260, T4
+  ~120 docs+wire, T5 ~180, T6 ~600 incl. layout). The harness slice counter
+  measures from origin/main and includes pre-existing main commit 31ed989,
+  so it overstates branch size. Push/PR remains a user decision.
+- L7 — Incident 21:37:34 +0100: an external `git checkout main` (reflog
+  HEAD@{0}, not issued by this session) moved the working tree off the
+  feature branch, hiding branch-only files and dropping the uncommitted doc
+  edits from L6's first attempt. Recovery was non-destructive: `git checkout
+  feat/input-control` carried the uncommitted Android work back; all commits
+  verified intact via reflog; doc lines re-recorded here.
