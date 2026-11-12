@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"clipboard-share/internal/api"
+	"clipboard-share/internal/clipboard"
 	"clipboard-share/internal/discovery"
 )
 
@@ -16,6 +17,10 @@ func main() {
 	port := "8765"
 	if p := os.Getenv("CLIPBOARD_SHARE_PORT"); p != "" {
 		port = p
+	}
+
+	if err := clipboard.Init(); err != nil {
+		log.Fatalf("clipboard init failed: %v", err)
 	}
 
 	if err := discovery.Announce("clipboard-share", port); err != nil {
