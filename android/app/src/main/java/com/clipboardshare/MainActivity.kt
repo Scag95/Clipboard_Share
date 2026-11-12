@@ -189,7 +189,12 @@ class MainActivity : AppCompatActivity() {
                     lastSyncedItem = local
                     return
                 }
-                push(url, local)
+                if (!push(url, local)) {
+                    // Push failed (413 oversize, 500 clipboard error, network):
+                    // do not pin the item, so the next poll retries it.
+                    Log.e(TAG, "push failed; item not marked synced")
+                    return
+                }
                 lastSyncedItem = local
                 return
             }
@@ -232,8 +237,9 @@ class MainActivity : AppCompatActivity() {
         return ClipItem(false, text, null)
     }
 
-    private fun push(url: String, item: ClipItem) {
-        if (item.isImage) {
+    /** Push returns true only when the server accepted the content (2xx). */
+    private fun push(url: String, item: ClipItem): Boolean {
+        return if (item.isImage) {
             setImage(url, item.png ?: ByteArray(0))
         } else {
             setText(url, item.text ?: "")
@@ -286,11 +292,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setText(url: String, text: String) {
+    private fun setText(url: String, text: String): Boolean {
         val json = JSONObject().put("text", text).toString()
         val body = json.toRequestBody("application/json".toMediaType())
         val req = Request.Builder().url("$url/clipboard/text").post(body).build()
-        client.newCall(req).execute().use { }
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                Log.e(TAG, "setText push: HTTP ${resp.code}")
+                return false
+            }
+            return true
+        }
     }
 
     private fun getImage(url: String): ByteArray? {
@@ -302,10 +314,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setImage(url: String, data: ByteArray) {
+    private fun setImage(url: String, data: ByteArray): Boolean {
         val body = data.toRequestBody("image/png".toMediaType())
         val req = Request.Builder().url("$url/clipboard/image").post(body).build()
-        client.newCall(req).execute().use { }
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                Log.e(TAG, "setImage push: HTTP ${resp.code}")
+                return false
+            }
+            return true
+        }
     }
 
     override fun onDestroy() {

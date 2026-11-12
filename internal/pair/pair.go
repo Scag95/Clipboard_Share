@@ -15,6 +15,14 @@ import (
 // the PIN is rotated (spent) and a fresh one is generated.
 const MaxFailures = 5
 
+// MaxRotations caps how many times the PIN may be spent by failed attempts
+// during one server run. Each rotation is a fresh 6-digit target, so without
+// a lifetime cap an unbounded request rate makes online brute force
+// statistically trivial (~1e6 guesses per PIN). Exhausting this cap locks
+// pairing until the server restarts, bounding total guesses per run at
+// MaxFailures*MaxRotations = 25.
+const MaxRotations = 5
+
 // Broker holds the current PIN and the set of issued session tokens. It is
 // safe for concurrent use.
 type Broker struct {
@@ -22,6 +30,7 @@ type Broker struct {
 	pin        string
 	tokens     map[string]struct{}
 	failures   int
+	rotations  int
 	onRotation func(string)
 }
 
@@ -50,6 +59,12 @@ func (b *Broker) Pin() string {
 // consecutive misses, rotates the PIN out.
 func (b *Broker) Pair(pin string) (string, bool) {
 	b.mu.Lock()
+	if b.rotations >= MaxRotations {
+		// Pairing is spent for this server run; even the correct PIN is
+		// refused until restart. See MaxRotations.
+		b.mu.Unlock()
+		return "", false
+	}
 	var cb func(string)
 	if subtle.ConstantTimeCompare([]byte(pin), []byte(b.pin)) != 1 {
 		b.failures++
@@ -57,6 +72,7 @@ func (b *Broker) Pair(pin string) (string, bool) {
 		if b.failures >= MaxFailures {
 			b.pin = randomPIN()
 			b.failures = 0
+			b.rotations++
 			rotated = true
 			cb = b.onRotation
 		}
@@ -72,6 +88,14 @@ func (b *Broker) Pair(pin string) (string, bool) {
 	b.tokens[token] = struct{}{}
 	b.mu.Unlock()
 	return token, true
+}
+
+// Locked reports whether pairing has exhausted its lifetime rotation cap and
+// is disabled until the server restarts.
+func (b *Broker) Locked() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.rotations >= MaxRotations
 }
 
 // Validate reports whether token was issued by this broker and is still

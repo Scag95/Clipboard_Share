@@ -108,3 +108,38 @@ func TestPinIsSixDigits(t *testing.T) {
 		}
 	}
 }
+
+func TestNotLockedBeforeRotationsExhausted(t *testing.T) {
+	b := NewBroker()
+	if b.Locked() {
+		t.Fatal("fresh broker must not be locked")
+	}
+	for i := 0; i < MaxFailures-1; i++ {
+		if _, ok := b.Pair("wrong-pin"); ok {
+			t.Fatal("wrong pin must not pair")
+		}
+	}
+	if _, ok := b.Pair(b.Pin()); !ok {
+		t.Fatal("correct pin must still pair below the rotation cap")
+	}
+}
+
+func TestPairingLocksAfterMaxRotations(t *testing.T) {
+	b := NewBroker()
+	wrong := func() string {
+		p := []byte(b.Pin())
+		p[0] = (p[0]-'0'+1)%10 + '0'
+		return string(p)
+	}
+	for i := 0; i < MaxFailures*MaxRotations; i++ {
+		if _, ok := b.Pair(wrong()); ok {
+			t.Fatalf("attempt %d unexpectedly accepted a wrong pin", i+1)
+		}
+	}
+	if !b.Locked() {
+		t.Fatalf("broker must be locked after %d rotations", MaxRotations)
+	}
+	if _, ok := b.Pair(b.Pin()); ok {
+		t.Fatal("locked broker must reject even the correct pin")
+	}
+}

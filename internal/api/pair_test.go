@@ -88,3 +88,24 @@ func TestPairEndpointGetNotAllowed(t *testing.T) {
 		t.Fatalf("GET /pair: status = %d, want 405", resp.StatusCode)
 	}
 }
+
+func TestPairEndpointLockedAfterMaxRotations(t *testing.T) {
+	s, b := newPairingServer(t)
+	wrong := func() string {
+		p := []byte(b.Pin())
+		p[0] = (p[0]-'0'+1)%10 + '0'
+		return string(p)
+	}
+	for i := 0; i < pair.MaxFailures*pair.MaxRotations; i++ {
+		resp := postPair(t, s.URL, `{"pin":"`+wrong()+`"}`)
+		// The attempt that exhausts the lifetime cap already reports the
+		// locked state, so the last one may answer 423 instead of 401.
+		if resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusLocked {
+			t.Fatalf("attempt %d: status = %d, want 401 or 423", i+1, resp.StatusCode)
+		}
+	}
+	resp := postPair(t, s.URL, `{"pin":"`+b.Pin()+`"}`)
+	if resp.StatusCode != http.StatusLocked {
+		t.Fatalf("locked status = %d, want 423", resp.StatusCode)
+	}
+}
