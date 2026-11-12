@@ -2,7 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+
+	"clipboard-share/internal/clipboard"
 
 	"github.com/gorilla/mux"
 )
@@ -27,9 +30,13 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTextHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO: leer del clipboard del SO.
+	text, err := clipboard.GetText()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(TextPayload{Text: ""})
+	_ = json.NewEncoder(w).Encode(TextPayload{Text: text})
 }
 
 func setTextHandler(w http.ResponseWriter, r *http.Request) {
@@ -38,17 +45,36 @@ func setTextHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// TODO: escribir al clipboard del SO.
+	if err := clipboard.SetText(p.Text); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func getImageHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO: servir imagen del clipboard (PNG).
+	data, err := clipboard.GetImage()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	w.Header().Set("Content-Type", "image/png")
-	w.WriteHeader(http.StatusNotImplemented)
+	w.Write(data)
 }
 
 func setImageHandler(w http.ResponseWriter, r *http.Request) {
-	// TODO: guardar imagen recibida en el clipboard del SO.
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := clipboard.SetImage(data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
