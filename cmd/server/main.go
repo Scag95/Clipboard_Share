@@ -13,6 +13,8 @@ import (
 	"clipboard-share/internal/api"
 	"clipboard-share/internal/clipboard"
 	"clipboard-share/internal/discovery"
+	"clipboard-share/internal/input"
+	"clipboard-share/internal/pair"
 )
 
 func main() {
@@ -32,7 +34,15 @@ func main() {
 		defer stopAnnounce()
 	}
 
+	pairer := pair.NewBroker()
+	log.Printf("remote-control pairing PIN: %s", pairer.Pin())
+	pairer.OnPINChange(func(p string) {
+		log.Printf("pairing PIN rotated (too many failed attempts); new PIN: %s", p)
+	})
+
 	r := api.NewRouter(clipboardStore{})
+	api.AttachPairing(r, pairer)
+	api.AttachInputWS(r, pairer, input.New(), api.DefaultInputRate)
 	addr := ":" + port
 	srv := &http.Server{Addr: addr, Handler: r}
 

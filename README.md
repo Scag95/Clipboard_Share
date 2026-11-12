@@ -39,6 +39,7 @@ Clipboard_Share/
 Dependencias Go (se descargan con `go mod tidy`):
 
 - `github.com/gorilla/mux` v1.8.1 — router HTTP.
+- `github.com/gorilla/websocket` v1.5.3 — stream de eventos de control remoto.
 - `github.com/grandcat/zeroconf` v1.0.0 — anuncio mDNS.
 - `golang.design/x/clipboard` v0.11.0 — lectura/escritura del clipboard del SO.
 
@@ -73,6 +74,37 @@ Endpoints:
 - `GET  /clipboard/image` — imagen actual del clipboard (PNG); `204` si no hay imagen.
 - `POST /clipboard/image` — escribe imagen al clipboard (body binario PNG).
   Tamaño máximo: 10 MiB; si se excede responde `413` sin tocar el clipboard.
+- `POST /pair` — pairing por PIN: body `{"pin":"123456"}` (el PIN de 6 dígitos
+  que el server imprime al arrancar). Devuelve `200` con `{"token":"..."}` si
+  es correcto, `401` si es incorrecto o ya no vale, `400` si el body está mal.
+  Tras 5 intentos seguidos fallidos el PIN se rota y se imprime uno nuevo.
+- `GET  /ws/input?token=<token>` — WebSocket de control remoto. Sin token
+  válido responde `401` antes del upgrade. Los eventos se envían como objetos
+  JSON (uno por frame):
+
+  ```jsonc
+  { "type": "move",   "dx": 12, "dy": -5 }              // delta relativo (≤1000)
+  { "type": "click",  "button": "left",  "mode": "tap" } // tap | down | up
+  { "type": "scroll", "dx": 0,  "dy": 2 }               // notch (≤100)
+  { "type": "key",    "key": "c", "mods": ["ctrl"] }    // tecla nombrada o carácter
+  { "type": "text",   "chars": "hola ñ" }               // unicode (≤1000 chars)
+  ```
+
+  Un evento inválido o fuera de rango responde `{"error": "..."}` y **no se
+  inyecta**; la conexión sigue abierta. Máximo 120 eventos/s por conexión.
+
+## Control remoto (mouse + teclado)
+
+El server puede recibir input del teléfono (rama `feat/input-control`,
+especificación en `odd/tasks/input-control.md`):
+
+1. Arrancar el server; anotar el **Pairing PIN** que imprime en la consola.
+2. En el teléfono, ingresar el PIN → se obtiene un token de sesión (`/pair`).
+3. La app abre `/ws/input` con el token y envía eventos (touchpad + teclado).
+
+En Windows la inyección usa `SendInput` (sin cgo, build tag `windows`); en
+otros sistemas el server registra eventos en un stub, útil para desarrollo.
+El clipboard sigue sin autenticación por ahora; el control de input **no**.
 
 ## Generar binario
 
@@ -84,6 +116,10 @@ go build -o clipboard-share.exe ./cmd/server
 
 - Servidor Go con clipboard real de Windows (texto + imagen), apagado ordenado
   (graceful shutdown) y límites de tamaño en la API.
+- Control remoto mouse + teclado en rama `feat/input-control`: pairing por PIN,
+  stream WebSocket con validación estricta, límites de tasa y `SendInput` en
+  Windows (texto unicode, teclas nombradas, shortcuts con modificadores).
 - Cliente Android: descubrimiento mDNS (NSD), sincronización bidireccional de
   texto e imágenes (PNG) con listener del clipboard y polling cada 2 s.
-- Tests: handlers HTTP del server (`internal/api`).
+- Tests: handlers HTTP del server, broker de pairing, parser de eventos y
+  stream WebSocket (`internal/api`, `internal/pair`, `internal/input`).

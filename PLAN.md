@@ -38,7 +38,9 @@ Documento para retomar el trabajo en otro equipo/entorno.
 - Documentar en README los pasos de build release.
 
 ### 5. Seguridad / robustez
-- Autenticación simple (token compartido) entre PC y móvil. Pendiente.
+- Autenticación simple (token compartido) entre PC y móvil. ✅ Hecho en rama
+  `feat/input-control` (pairing por PIN de 6 dígitos + token de sesión para
+  `/ws/input`; el clipboard aún sin auth). Pendiente extender auth al clipboard.
 - Validar tamaño máximo de imagen. ✅ Hecho (10 MiB, responde 413).
 - Manejo de errores de red y reconexión automática: el polling de Android ya
   reintenta solo; falta backoff y notificación de estado.
@@ -62,6 +64,10 @@ Documento para retomar el trabajo en otro equipo/entorno.
 
 - El servidor escucha en `:8765` (env `CLIPBOARD_SHARE_PORT`).
 - mDNS service type: `_clipboard-share._tcp`.
-- Endpoints: `GET/POST /clipboard/text`, `GET/POST /clipboard/image`, `GET /health`.
+- Endpoints: `GET/POST /clipboard/text`, `GET/POST /clipboard/image`,
+  `GET /health`, `POST /pair`, `GET /ws/input?token=...` (rama
+  `feat/input-control`).
 - Firewall de Windows debe permitir el puerto 8765.
 - PC y móvil deben estar en la misma LAN para mDNS.
+- Feature en curso mouse/teclado remoto: spec, tasks y evidencia en
+  `odd/tasks/input-control.md`.

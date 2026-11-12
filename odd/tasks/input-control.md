@@ -47,8 +47,8 @@ PIN pairing auth, separate Android screen. Clipboard sync stays as-is.
 | ID | Specs | Route | Commit |
 |----|-------|-------|--------|
 | T1 | S4 | parent inline: `internal/pair` PIN/token store + tests | `71a7de7` |
-| T2 | S6, S7 | parent inline: `internal/input` events, Injector, stub + Windows SendInput + tests | `e03fe0a` |
-| T3 | S3, S4, S6 | parent inline: WebSocket `/ws/input` handler with token gate + rate clamp + tests | — |
+| T2 | S6, S7 | parent inline: `internal/input` events, Injector, stub + Windows SendInput + tests | `1b307e4` |
+| T3 | S3, S4, S6 | parent inline: WebSocket `/ws/input` handler with token gate + rate clamp + tests | `1980e0f` |
 | T4 | S1, S4 | parent inline: wire `cmd/server/main.go`, deps, README + PLAN updates | — |
 | T5 | S3, S4 | parent inline: Android OkHttp WS client + pairing flow (PIN entry, token persistence) | — |
 | T6 | S2, S5 | parent inline: Android `RemoteControlActivity` touchpad + text/shortcuts, manifest, entry point | — |
