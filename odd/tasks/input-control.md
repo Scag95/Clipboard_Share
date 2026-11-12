@@ -51,7 +51,7 @@ PIN pairing auth, separate Android screen. Clipboard sync stays as-is.
 | T3 | S3, S4, S6 | parent inline: WebSocket `/ws/input` handler with token gate + rate clamp + tests | `1980e0f` |
 | T4 | S1, S4 | parent inline: wire `cmd/server/main.go`, deps, README + PLAN updates | `a543431` |
 | T5 | S3, S4 | parent inline: Android OkHttp WS client + pairing flow (PIN entry, token persistence) | `e272e68` |
-| T6 | S2, S5 | parent inline: Android `RemoteControlActivity` touchpad + text/shortcuts, manifest, entry point | — |
+| T6 | S2, S5 | parent inline: Android `RemoteControlActivity` touchpad + text/shortcuts, manifest, entry point | `041e8a1` |
 
 ## Log
 
@@ -82,3 +82,12 @@ PIN pairing auth, separate Android screen. Clipboard sync stays as-is.
   edits from L6's first attempt. Recovery was non-destructive: `git checkout
   feat/input-control` carried the uncommitted Android work back; all commits
   verified intact via reflog; doc lines re-recorded here.
+- L8 — Close: all six tasks committed on `feat/input-control`. Verified:
+  `go test -count=1 ./internal/...` + `-race` (pair, input, api ws),
+  `GOOS=windows go build/vet ./...`, gofmt clean, xmllint on changed XML,
+  live-server smoke (:18765): PIN printed, health 200, wrong PIN 401, pair
+  issues 64-hex token, /ws/input 401 without token, 101 upgrade with token.
+  Not verified: Android Kotlin compile/behavior and Windows injection runtime
+  (no gradle/SDK/Windows host here). gentle_review assess of T6 candidate:
+  risk medium, reviewDue false (under_budget, rdd on). External `git checkout
+  main` incident recovered (L7).
