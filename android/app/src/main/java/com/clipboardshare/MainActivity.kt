@@ -1,6 +1,8 @@
 package com.clipboardshare
 
 import android.content.ClipData
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.nsd.NsdManager
@@ -118,6 +120,58 @@ class MainActivity : AppCompatActivity() {
         val json = JSONObject().put("text", text).toString()
         val body = json.toRequestBody("application/json".toMediaType())
         val req = Request.Builder().url("$url/clipboard/text").post(body).build()
+        client.newCall(req).execute().close()
+    }
+
+
+    private fun syncImage() {
+        val url = serviceUrl ?: return
+        lifecycleScope.launch {
+            try {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = cm.primaryClip
+                val hasImage = clip != null && clip.description.hasMimeType("image/*")
+                if (!hasImage) {
+                    val bytes = withContext(Dispatchers.IO) { getImage(url) }
+                    if (bytes != null) {
+                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (bmp != null) {
+                            val values = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+                            }
+                            val uri = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                            if (uri != null) {
+                                contentResolver.openOutputStream(uri)?.use { out -> out.write(bytes) }
+                                cm.setPrimaryClip(ClipData.newUri(contentResolver, "shared", uri))
+                            }
+                        }
+                    }
+                } else {
+                    val uri = clip?.getItemAt(0)?.uri
+                    val bmp = uri?.let { contentResolver.openInputStream(it)?.use { s -> BitmapFactory.decodeStream(s) } }
+                    if (bmp != null) {
+                        val out = java.io.ByteArrayOutputStream()
+                        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        withContext(Dispatchers.IO) { setImage(url, out.toByteArray()) }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Image sync error: ${e.message}")
+            }
+        }
+    }
+
+    private fun getImage(url: String): ByteArray? {
+        val req = Request.Builder().url("$url/clipboard/image").get().build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            return resp.body?.bytes()
+        }
+    }
+
+    private fun setImage(url: String, data: ByteArray) {
+        val body = data.toRequestBody("image/png".toMediaType())
+        val req = Request.Builder().url("$url/clipboard/image").post(body).build()
         client.newCall(req).execute().close()
     }
 
