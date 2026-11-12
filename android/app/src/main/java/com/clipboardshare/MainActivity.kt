@@ -183,17 +183,23 @@ class MainActivity : AppCompatActivity() {
             val local = readLocalClip()
             if (local != null && local != lastSyncedItem) {
                 if (local.isImage && !shareImagesEnabled) {
-                    // Pin the content without sending it: the server is
-                    // discovered unauthenticated, so image push is opt-in.
-                    lastSyncedItem = local
-                } else {
-                    push(url, local)
+                    // Pin the content without sending it, and end this sync
+                    // step: fetching remote content now could overwrite the
+                    // user's unsent local image.
                     lastSyncedItem = local
                     return
                 }
+                push(url, local)
+                lastSyncedItem = local
+                return
             }
             val remote = fetchRemoteClip(url)
             if (remote != null && remote != lastSyncedItem) {
+                if (local?.isImage == true && !shareImagesEnabled) {
+                    // An unsent local image wins: applying remote text would
+                    // silently overwrite content the user wanted kept.
+                    return
+                }
                 applyRemote(remote)
                 lastSyncedItem = remote
             }
