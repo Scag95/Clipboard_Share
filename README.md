@@ -82,5 +82,5 @@ go build -o clipboard-share.exe ./cmd/server
 ## Estado del proyecto
 
 - Servidor Go funcional con clipboard real de Windows (texto + imagen).
-- Cliente Android: scaffold inicial (pendiente implementación).
+- Cliente Android: descubrimiento mDNS (NSD) + sincronizacion de texto e imagenes (PNG).
 EOF
