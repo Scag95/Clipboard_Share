@@ -91,3 +91,12 @@ PIN pairing auth, separate Android screen. Clipboard sync stays as-is.
   (no gradle/SDK/Windows host here). gentle_review assess of T6 candidate:
   risk medium, reviewDue false (under_budget, rdd on). External `git checkout
   main` incident recovered (L7).
+- L9 — Native review lineage review-adda0b06e17bc9e2 (tier medium, lenses
+  risk/resilience/reliability): 3 reviewers + refuter + bounded correction
+  (102 diff lines, commit 3547a0f). Targeted validator verdict: original 6
+  findings PASSED; correction REJECTED on one new regression
+  (MainActivity.runSync:185-195 — image pinned but no return, remote text can
+  overwrite the unsent local image when image sync is off). State: escalated
+  (terminal; correction budget of one bounded correction exhausted). Reviewer
+  cost total ~0.38 USD. Pending user decision: one-line regression fix +
+  handling, deliver as-is with documented follow-up, or stop.
