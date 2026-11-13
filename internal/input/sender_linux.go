@@ -279,7 +279,9 @@ func NewLinux() (Injector, error) {
 	}
 	device := &uinputDevice{file: os.NewFile(uintptr(fd), "/dev/uinput")}
 	if err := device.setup(); err != nil {
-		_ = device.file.Close()
+		// setup may have already created the device before failing; Close
+		// destroys it when it exists and always releases the fd.
+		_ = device.Close()
 		return nil, fmt.Errorf("configure /dev/uinput: %w", err)
 	}
 	sender := &LinuxSender{device: device}
@@ -331,13 +333,27 @@ func appendKeyEvent(events []inputEvent, code uint16, value int32) []inputEvent 
 	)
 }
 
+// clampDelta bounds a delta to the protocol range before the int32 event
+// conversion, so out-of-range values cannot wrap into the opposite direction
+// (parse.go already rejects them at the wire boundary; the sender keeps the
+// invariant for every caller).
+func clampDelta(v, limit int) int32 {
+	if v > limit {
+		v = limit
+	}
+	if v < -limit {
+		v = -limit
+	}
+	return int32(v)
+}
+
 func (s *LinuxSender) Move(dx, dy int) error {
 	events := make([]inputEvent, 0, 3)
-	if dx != 0 {
-		events = append(events, inputEvent{Type: evRel, Code: relX, Value: int32(dx)})
+	if v := clampDelta(dx, MaxPointerDelta); v != 0 {
+		events = append(events, inputEvent{Type: evRel, Code: relX, Value: v})
 	}
-	if dy != 0 {
-		events = append(events, inputEvent{Type: evRel, Code: relY, Value: int32(dy)})
+	if v := clampDelta(dy, MaxPointerDelta); v != 0 {
+		events = append(events, inputEvent{Type: evRel, Code: relY, Value: v})
 	}
 	if len(events) == 0 {
 		return nil
@@ -349,11 +365,11 @@ func (s *LinuxSender) Move(dx, dy int) error {
 func (s *LinuxSender) Scroll(dx, dy int) error {
 	events := make([]inputEvent, 0, 3)
 	// As on Windows, positive deltas scroll content down.
-	if dy != 0 {
-		events = append(events, inputEvent{Type: evRel, Code: relWheel, Value: int32(-dy)})
+	if v := clampDelta(dy, MaxScrollNotches); v != 0 {
+		events = append(events, inputEvent{Type: evRel, Code: relWheel, Value: -v})
 	}
-	if dx != 0 {
-		events = append(events, inputEvent{Type: evRel, Code: relHWheel, Value: int32(-dx)})
+	if v := clampDelta(dx, MaxScrollNotches); v != 0 {
+		events = append(events, inputEvent{Type: evRel, Code: relHWheel, Value: -v})
 	}
 	if len(events) == 0 {
 		return nil
@@ -394,9 +410,13 @@ func (s *LinuxSender) Key(key string, mods []string) error {
 	}
 	modCodes := make([]uint16, 0, len(mods))
 	for _, mod := range mods {
-		if modCode := linuxModCode(mod); modCode != 0 {
-			modCodes = append(modCodes, modCode)
+		modCode := linuxModCode(mod)
+		if modCode == 0 {
+			// Reject before emitting anything: silently dropping an unknown
+			// modifier would inject Ctrl+V where Ctrl+something-else was asked.
+			return fmt.Errorf("unknown modifier %q", mod)
 		}
+		modCodes = append(modCodes, modCode)
 	}
 	events := make([]inputEvent, 0, (2+2*len(modCodes))*2)
 	for _, modCode := range modCodes {

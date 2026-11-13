@@ -58,3 +58,14 @@ hacer pruebas reales en esta máquina, y sync solo con la app abierta
   health, texto GET/POST vía wl-copy/wl-paste reales, imagen PNG GET/POST
   (200/204, tipo image/png), /pair PIN 200 y PIN malo 401. Faltan: udev
   uinput (necesita sudo del usuario) y prueba con dispositivo físico.
+- L4 — Independent verifier (mwf3dnoj-4-xq14) sobre 4931d99..bc4a1a5:
+  reproducidos y corregidos (1) overflow int32 en Move/Scroll fuera de rango
+  (MaxInt llegaba a -1) → clampDelta antes de emitir; (2) mods desconocidos
+  se ignoraban en silencio → ahora error antes de emitir ningún evento;
+  (3) UI_DEV_DESTROY no corría si setup fallaba tras crear el dispositivo →
+  NewLinux cierra con destroy. Probes fijados como tests
+  (linux_sender_bounds_test.go, linux_sender_modifier_test.go).
+  Rechazado el probe "No suitable type of content copied = error": para
+  GET /clipboard/image ese caso significa "el clipboard no tiene imagen" →
+  nil/204 es la semántica correcta del producto (y ya estaba fijada por
+  test del worker).
