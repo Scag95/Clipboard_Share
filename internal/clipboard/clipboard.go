@@ -9,18 +9,57 @@ import (
 	"golang.design/x/clipboard"
 )
 
-// requestTimeout bounds every OS clipboard call so a hung clipboard backend
-// cannot wedge an HTTP request indefinitely.
+// requestTimeout bounds every library clipboard call so a hung clipboard
+// backend cannot wedge an HTTP request indefinitely.
 const requestTimeout = 3 * time.Second
+
+type clipboardBackend interface {
+	Init() error
+	GetText() (string, error)
+	SetText(string) error
+	GetImage() ([]byte, error)
+	SetImage([]byte) error
+}
+
+var systemBackend clipboardBackend = newBackend()
 
 // Init inicializa el subsistema de clipboard. Debe llamarse una vez al arrancar.
 func Init() error {
-	return clipboard.Init()
+	return systemBackend.Init()
 }
 
 // GetText devuelve el texto actual del clipboard del SO.
 // Un clipboard sin texto devuelve cadena vacía, no un error.
 func GetText() (string, error) {
+	return systemBackend.GetText()
+}
+
+// SetText escribe texto al clipboard del SO.
+func SetText(text string) error {
+	return systemBackend.SetText(text)
+}
+
+// GetImage devuelve la imagen del clipboard como PNG (bytes).
+// Devuelve nil si no hay imagen en el clipboard.
+func GetImage() ([]byte, error) {
+	return systemBackend.GetImage()
+}
+
+// SetImage escribe una imagen (PNG/JPEG bytes) al clipboard del SO.
+func SetImage(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("empty image data")
+	}
+	return systemBackend.SetImage(data)
+}
+
+type libraryBackend struct{}
+
+func (libraryBackend) Init() error {
+	return clipboard.Init()
+}
+
+func (libraryBackend) GetText() (string, error) {
 	data, err := readWithTimeout(clipboard.FmtText)
 	if errors.Is(err, clipboard.ErrNoData) {
 		return "", nil
@@ -31,14 +70,11 @@ func GetText() (string, error) {
 	return string(data), nil
 }
 
-// SetText escribe texto al clipboard del SO.
-func SetText(text string) error {
+func (libraryBackend) SetText(text string) error {
 	return writeWithTimeout(clipboard.FmtText, []byte(text))
 }
 
-// GetImage devuelve la imagen del clipboard como PNG (bytes).
-// Devuelve nil si no hay imagen en el clipboard.
-func GetImage() ([]byte, error) {
+func (libraryBackend) GetImage() ([]byte, error) {
 	data, err := readWithTimeout(clipboard.FmtImage)
 	if errors.Is(err, clipboard.ErrNoData) {
 		return nil, nil
@@ -49,11 +85,7 @@ func GetImage() ([]byte, error) {
 	return data, nil
 }
 
-// SetImage escribe una imagen (PNG/JPEG bytes) al clipboard del SO.
-func SetImage(data []byte) error {
-	if len(data) == 0 {
-		return fmt.Errorf("empty image data")
-	}
+func (libraryBackend) SetImage(data []byte) error {
 	return writeWithTimeout(clipboard.FmtImage, data)
 }
 
