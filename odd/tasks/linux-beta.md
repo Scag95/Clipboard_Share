@@ -86,3 +86,10 @@ hacer pruebas reales en esta máquina, y sync solo con la app abierta
   192.168.0.0/24 (la añadió el usuario). Regla udev uinput escrita correcta
   pero /dev/uinput sigue root:root 0600 y la sesión actual no tiene grupo
   input → touchpad real (T5b) espera reinicio.
+- L7 — Review nativo del candidato Linux beta (rango e8e86f0..acdd230, tier
+  high, lineage review-2ae0a3a35e62876a): 3 lenses + refuter confirmaron 3
+  severos (wl subprocesses sin deadline [R3-002/R4-001 BLOCKER] y emit sin
+  manejo de EAGAIN parcial [R4-002]). Corrección acotada de 160 líneas
+  (runBounded con kill a 3s; retry EAGAIN + releases best-effort), validator
+  dirigido APROBÓ, acknowledgement quemado. Advisory no bloqueantes:
+  wl-init sin display en CI, códigos uinput mapeados en runtime, etc.
