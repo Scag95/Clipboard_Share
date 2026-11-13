@@ -69,3 +69,10 @@ hacer pruebas reales en esta máquina, y sync solo con la app abierta
   GET /clipboard/image ese caso significa "el clipboard no tiene imagen" →
   nil/204 es la semántica correcta del producto (y ya estaba fijada por
   test del worker).
+- L5 — Verifier independiente sobre e6b7b41: APROBADO, sin blockers.
+  RED→GREEN reproducido en el padre vs commit (Move(MaxInt) emitía (-1,0),
+  ahora clamp ±1000; Key con mod inválido devolvía nil, ahora error
+  atómico antes de emitir). Destroy post-setup-failure verificado por
+  lectura (sin privilegios no es inyectable). La sonda durable sugerida se
+  omitió: ya cubierta por linux_sender_bounds_test.go y
+  linux_sender_modifier_test.go.
