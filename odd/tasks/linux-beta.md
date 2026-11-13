@@ -49,3 +49,12 @@ hacer pruebas reales en esta máquina, y sync solo con la app abierta
   pruebas. por ahora podemos dejar la app que funcione solo cuando este
   abierta. luego implementamos el background sync. si necesitas el sdk de
   android studio avisame y lo instalamos."
+- L2 — Hallazgo T1: en Hyprland/Wayland la librería X11 lee el clipboard
+  pero las escrituras no llegan (wl-paste "Nothing is copied"); resuelto con
+  backend wl-clipboard (commit 4931d99). Dos gaps del worker corregidos por
+  el padre: hang del daemon wl-copy sobre el pipe de stderr (WaitDelay +
+  exit-code 0) y nil-vs-empty args en el helper de tests.
+- L3 — E2E server-linux verificado desde worktree limpio del HEAD 354b3c5:
+  health, texto GET/POST vía wl-copy/wl-paste reales, imagen PNG GET/POST
+  (200/204, tipo image/png), /pair PIN 200 y PIN malo 401. Faltan: udev
+  uinput (necesita sudo del usuario) y prueba con dispositivo físico.
