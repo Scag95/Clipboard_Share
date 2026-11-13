@@ -76,3 +76,13 @@ hacer pruebas reales en esta máquina, y sync solo con la app abierta
   lectura (sin privilegios no es inyectable). La sonda durable sugerida se
   omitió: ya cubierta por linux_sender_bounds_test.go y
   linux_sender_modifier_test.go.
+- L6 — E2E en dispositivo real (SM-S908E, app abierta) VERIFICADO para el
+  clipboard: celu→PC copy apareció en wl-paste; server→PC y PC→server también.
+  Dos blockers de red encontrados y corregidos:
+  (a) Android bloqueaba http cleartext → manifest ahora
+  android:usesCleartextTraffic="true" (apropiado para beta LAN sin TLS;
+  hardening TLS queda en PLAN Seguridad). APK debug reconstruido+reinstalado.
+  (b) ufw activo bloqueaba 8765 desde otros hosts → regla allow from
+  192.168.0.0/24 (la añadió el usuario). Regla udev uinput escrita correcta
+  pero /dev/uinput sigue root:root 0600 y la sesión actual no tiene grupo
+  input → touchpad real (T5b) espera reinicio.

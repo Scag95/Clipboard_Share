@@ -9,7 +9,10 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- Beta personal: el server LAN habla http/ws sin TLS (ver PLAN "Seguridad"
+         como trabajo futuro para una versión pública). -->
     <application
+        android:usesCleartextTraffic="true"
         android:label="Clipboard Share"
         android:icon="@drawable/ic_launcher"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
