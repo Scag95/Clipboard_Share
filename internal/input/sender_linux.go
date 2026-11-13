@@ -3,16 +3,25 @@
 package input
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
+
+// gestureWriteDeadline bounds EAGAIN retries across one gesture batch. The
+// uinput queue is opened O_NONBLOCK, so a burst can transiently reject a
+// write; the kernel drains the queue within milliseconds.
+const gestureWriteDeadline = 500 * time.Millisecond
+
+const eventWriteRetryInterval = 2 * time.Millisecond
 
 // Linux input event types and codes from linux/input-event-codes.h.
 const (
@@ -318,12 +327,24 @@ func (s *LinuxSender) emit(events []inputEvent) error {
 	if s.closed {
 		return fmt.Errorf("linux input injector is closed")
 	}
+	var firstErr error
+	deadline := time.Now().Add(gestureWriteDeadline)
 	for _, event := range events {
-		if err := s.device.WriteEvent(event); err != nil {
-			return fmt.Errorf("write /dev/uinput event: %w", err)
+		err := s.device.WriteEvent(event)
+		for errors.Is(err, unix.EAGAIN) && time.Now().Before(deadline) {
+			time.Sleep(eventWriteRetryInterval)
+			err = s.device.WriteEvent(event)
+		}
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("write uinput event: %w", err)
+			}
+			// Keep writing the rest of the batch anyway: gesture sequences end
+			// in modifier/button releases, and skipping them would leave keys
+			// stuck on the desktop.
 		}
 	}
-	return nil
+	return firstErr
 }
 
 func appendKeyEvent(events []inputEvent, code uint16, value int32) []inputEvent {

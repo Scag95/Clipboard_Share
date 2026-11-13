@@ -255,6 +255,7 @@ type fakeCommand struct {
 	stdout   []byte
 	stderr   string
 	exitCode int
+	hang     bool
 }
 
 func useFakeWayland(t *testing.T, expected fakeCommand) {
@@ -274,6 +275,20 @@ func useFakeWayland(t *testing.T, expected fakeCommand) {
 	t.Setenv("CLIPBOARD_TEST_STDOUT", base64.StdEncoding.EncodeToString(expected.stdout))
 	t.Setenv("CLIPBOARD_TEST_STDERR", expected.stderr)
 	t.Setenv("CLIPBOARD_TEST_EXIT", fmt.Sprint(expected.exitCode))
+	t.Setenv("CLIPBOARD_TEST_HANG", fmt.Sprint(expected.hang))
+}
+
+func TestWaylandPasteHangIsKilledAtDeadline(t *testing.T) {
+	useFakeWayland(t, fakeCommand{name: "wl-paste", args: []string{"--no-newline"}, hang: true})
+	start := time.Now()
+	_, err := GetText()
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("GetText() error = %v, want timeout kill", err)
+	}
+	if elapsed > 2*wlProcessTimeout {
+		t.Fatalf("hang was bounded by %v, want near %v", elapsed, wlProcessTimeout)
+	}
 }
 
 func fakeExecCommand(command string, args ...string) *exec.Cmd {
@@ -301,6 +316,9 @@ func TestClipboardHelperProcess(t *testing.T) {
 	}
 	command := os.Args[separator+1]
 	args := os.Args[separator+2:]
+	if os.Getenv("CLIPBOARD_TEST_HANG") == "true" {
+		select {} // never answers; the caller must kill us at the deadline
+	}
 	if command != os.Getenv("CLIPBOARD_TEST_COMMAND") {
 		fmt.Fprintf(os.Stderr, "command = %q, want %q\n", command, os.Getenv("CLIPBOARD_TEST_COMMAND"))
 		os.Exit(2)
