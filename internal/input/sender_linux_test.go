@@ -3,7 +3,6 @@
 package input
 
 import (
-	"os"
 	"reflect"
 	"testing"
 )
@@ -226,9 +225,6 @@ func TestNewWithoutDisplayUsesRecorder(t *testing.T) {
 }
 
 func TestNewLinuxUinputWhenAvailable(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("uinput integration test requires root; mapping tests do not")
-	}
 	injector, err := NewLinux()
 	if err != nil {
 		t.Skipf("/dev/uinput is unavailable: %v", err)

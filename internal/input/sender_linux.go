@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"runtime"
 	"strings"
@@ -299,12 +300,18 @@ func NewLinux() (Injector, error) {
 }
 
 // New returns the real Linux injector when a graphical session and uinput are
-// available. Otherwise it preserves Recorder for development and tests (S7).
+// available. Otherwise it preserves Recorder for development and tests (S7),
+// logging why so an operator never mistakes recording for injecting.
 func New() Injector {
 	if os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("DISPLAY") != "" {
-		if injector, err := NewLinux(); err == nil {
+		injector, err := NewLinux()
+		if err == nil {
+			log.Printf("input: uinput injector active")
 			return injector
 		}
+		log.Printf("input: falling back to recorder (no injection): %v", err)
+	} else {
+		log.Printf("input: no display session, using recorder (no injection)")
 	}
 	return &Recorder{}
 }
