@@ -77,3 +77,14 @@ seleccionar host.
   leer el clipboard local sin foco, el estado dice "celu → PC solo con la
   app abierta" y README/PLAN/spec ya no prometen el sync bidireccional en
   background. El arreglo real queda en odd/tasks/bg-phone-to-pc.md.
+- L4 - Resultado del review nativo (lineage review-28f45c0bab8e3371, revisor
+  anthropic/claude-opus-5-5): lente reliability + refuter confirmaron R3-001;
+  la correccion acotada (bfdd985, 80 lineas) fue RECHAZADA por el validator
+  (estado escalated, terminal, sin aprobacion). Motivo: reescribir el alcance
+  no cumple el criterio original; ademas en background un cambio nuevo del
+  PC sigue pisando una copia del celu que nunca se envio. Seguimientos del
+  validator: (1) el gate de visibilidad aplica tambien por debajo de
+  Android 10 (minSdk 24), donde la lectura en background si esta permitida;
+  (2) el spec bg-phone-to-pc debe estar versionado (lo esta desde este
+  commit); (3) "activity started" no es "ventana con foco" (multiventana).
+  Costo total ~$0.45. El arreglo real sigue en odd/tasks/bg-phone-to-pc.md.
