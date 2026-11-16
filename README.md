@@ -177,9 +177,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 La beta es de uso personal: APK debug por USB/`adb` o `adb connect` por Wi-Fi,
-sin Play Store. El sync de clipboard corre en segundo plano apenas elegís un
-host (con notificación persistente, requisito de Android); el control remoto
-requiere la pantalla abierta.
+sin Play Store. Al elegir un host arranca un servicio con notificación
+persistente (requisito de Android) que mantiene **PC → celu** en segundo
+plano; **celu → PC** y el control remoto requieren la app abierta.
 
 ## Estado del proyecto
 
@@ -192,9 +192,12 @@ requiere la pantalla abierta.
   Linux.
 - Cliente Android: home con lista de hosts (vivos + recordados), tokens por
   host con reconexión transparente, sincronización bidireccional de texto e
-  imágenes (PNG) en **segundo plano** vía ForegroundService atado al último
-  host elegido (tras reiniciar el teléfono alcanza con abrir la app una vez
-  para reactivar el servicio), y control remoto (trackpad + teclado + botones
-  de click) en su propia pantalla.
+  imágenes (PNG) **con la app abierta**, y **PC → celu también en segundo
+  plano** vía ForegroundService atado al último host elegido (tras reiniciar
+  el teléfono alcanza con abrir la app una vez para reactivar el servicio).
+  Limitación de Android 10+: sin foco la app no puede leer el clipboard, así
+  que **celu → PC solo funciona con la app abierta**; el envío automático en
+  segundo plano está especificado en `odd/tasks/bg-phone-to-pc.md` (pendiente).
+  Control remoto (trackpad + teclado + botones de click) en su propia pantalla.
 - Tests: handlers HTTP del server, broker de pairing, parser de eventos y
   stream WebSocket (`internal/api`, `internal/pair`, `internal/input`).

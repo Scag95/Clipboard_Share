@@ -43,7 +43,8 @@ seleccionar host.
   (notif visible en `dumpsys notification`) → app a background → `wl-copy`
   en PC → dentro de ~3 s el celu recibe el texto (verificable por log del
   servicio en logcat); (b) copia manual en el celu por el usuario →
-  `GET /clipboard/text` del server muestra el texto; (c) matar el server →
+  `GET /clipboard/text` del server muestra el texto — **solo con la app
+  visible** (ver L3: sin foco Android 10+ niega la lectura); (c) matar el server →
   la notif pasa a "Sin conexión" y al levantarlo vuelve sola (retry loop
   del servicio), sin reabrir la app.
 
@@ -67,3 +68,12 @@ seleccionar host.
   notif actualizada (PluginAOD onNotificationInfoUpdated com.clipboardshare).
   Singleton de ctl.sock verificó por accidente: segundo server rechazado.
   Falta (b): copia manual del usuario celu→PC.
+- L3 — Review nativo (opus, review-reliability + refuter) halló R3-001
+  CRITICAL: en Android 10+ el servicio no puede leer el clipboard sin foco,
+  así que celu→PC jamás ocurre en background y README/spec lo afirmaban.
+  El usuario ya lo había reportado ("solo sincroniza cuando entro a la
+  app"); medido: 4 denegaciones/8 s con la app en background (API 36).
+  Corrección acotada: contador de visibilidad real, el servicio no intenta
+  leer el clipboard local sin foco, el estado dice "celu → PC solo con la
+  app abierta" y README/PLAN/spec ya no prometen el sync bidireccional en
+  background. El arreglo real queda en odd/tasks/bg-phone-to-pc.md.

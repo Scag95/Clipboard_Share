@@ -197,6 +197,16 @@ class RemoteControlActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    override fun onStart() {
+        super.onStart()
+        ClipboardSyncService.onActivityStarted()
+    }
+
+    override fun onStop() {
+        ClipboardSyncService.onActivityStopped()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         manualDisconnect = true
         pairingJob?.cancel()

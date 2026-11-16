@@ -251,6 +251,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    override fun onStart() {
+        super.onStart()
+        ClipboardSyncService.onActivityStarted()
+    }
+
+    override fun onStop() {
+        ClipboardSyncService.onActivityStopped()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         try {
             nsdManager.stopServiceDiscovery(discoveryListener)

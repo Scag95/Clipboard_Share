@@ -50,6 +50,22 @@ class ClipboardSyncService : Service() {
         var clipboardStatus: String = "Sincronización inactiva"
             private set
 
+        /**
+         * Started activities of this app. Android 10+ lets only the focused app read
+         * the clipboard, so the local side is only readable while this is above zero.
+         */
+        private val visibleActivities = java.util.concurrent.atomic.AtomicInteger(0)
+
+        fun onActivityStarted() {
+            visibleActivities.incrementAndGet()
+        }
+
+        fun onActivityStopped() {
+            visibleActivities.updateAndGet { maxOf(0, it - 1) }
+        }
+
+        private fun appVisible(): Boolean = visibleActivities.get() > 0
+
         fun ensureStarted(context: Context) {
             val appContext = context.applicationContext
             ContextCompat.startForegroundService(
@@ -259,7 +275,11 @@ class ClipboardSyncService : Service() {
         return try {
             // Read on every step so the UI checkbox takes effect without a restart.
             shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
-            val local = readLocalClip()
+            // Without focus Android denies the read (phone -> PC cannot work in the
+            // background), so do not even try: the denied read only returns null.
+            val canReadLocal = appVisible()
+            val statusSuffix = if (canReadLocal) "" else " · celu → PC solo con la app abierta"
+            val local = if (canReadLocal) readLocalClip() else null
             if (local != null && local != lastSyncedItem) {
                 if (local.isImage && !shareImagesEnabled) {
                     // Do not let remote content overwrite an unsent local image.
@@ -282,9 +302,9 @@ class ClipboardSyncService : Service() {
                 if (local?.isImage == true && !shareImagesEnabled) return true
                 applyRemote(remote)
                 lastSyncedItem = remote
-                clipboardStatus = "Portapapeles sincronizado"
+                clipboardStatus = "Portapapeles sincronizado$statusSuffix"
             } else {
-                clipboardStatus = "Sincronización activa"
+                clipboardStatus = "Sincronización activa$statusSuffix"
             }
             true
         } catch (e: Exception) {
