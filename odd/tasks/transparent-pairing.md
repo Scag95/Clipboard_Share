@@ -85,3 +85,10 @@ sobreviviendo reinicios de ambos lados.
   S3/S6 mencionaban vínculo token↔IP heredado del WIP descartado de la
   sesión paralela; el código real valida solo token, y ambos workers lo
   conservaron correctamente (Validate(token)).
+- L4 — T5 E2E completo con celu real (todo vía adb, sin toques manuales):
+  Conectar → pending 202 visto por `pair list` → `pair --last` aprobo →
+  celu mostró "Conectado … como SM-S908E" y guardó token → state.json
+  persistido con identidad → reinicié el server → al abrir Control remoto,
+  reconexión TRANSPARENTE sin tocar nada → swipe simulado en touchpad
+  aceptado sin rechazos. T5 cubierto; feature cerrado salvo review nativo
+  del candidato nuevo.
