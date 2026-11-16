@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,6 +30,23 @@ func main() {
 	runServer()
 }
 
+// instanceName returns the hostname to announce over mDNS so clients show
+// the real machine name ("omarchy", "livingroom-pc"), falling back to
+// "clipboard-share" when the hostname is unusable.
+func instanceName() string {
+	name, err := os.Hostname()
+	if err != nil {
+		return "clipboard-share"
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "clipboard-share"
+	}
+	if len(name) > 60 {
+		name = name[:60]
+	}
+	return name
+}
 func runServer() {
 	port := "8765"
 	if p := os.Getenv("CLIPBOARD_SHARE_PORT"); p != "" {
@@ -44,7 +62,7 @@ func runServer() {
 		log.Fatalf("clipboard init failed: %v", err)
 	}
 
-	stopAnnounce, err := discovery.Announce("clipboard-share", port)
+	stopAnnounce, err := discovery.Announce(instanceName(), port)
 	if err != nil {
 		log.Printf("warning: mDNS announce failed: %v", err)
 	} else {
