@@ -1,5 +1,6 @@
 package com.clipboardshare
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -58,7 +59,7 @@ class InputClient(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 ws = null
-                listener.onDisconnected(reason)
+                listener.onDisconnected(if (code == 1008) "unauthorized" else reason)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -111,27 +112,78 @@ class InputClient(
     private fun clampNotches(v: Int): Int = v.coerceIn(-100, 100)
 }
 
-/** Exchanges the pairing PIN for a session token (S4). */
+/** Device-identity pairing requests and approval polling (S3/S5). */
 object PairingClient {
+    sealed class RequestResult {
+        data class Approved(val token: String) : RequestResult()
+        data class Pending(val requestId: String) : RequestResult()
+        object TooManyRequests : RequestResult()
+        object Failed : RequestResult()
+    }
+
+    sealed class StatusResult {
+        object Pending : StatusResult()
+        data class Approved(val token: String) : StatusResult()
+        object Denied : StatusResult()
+        object Expired : StatusResult()
+        object Failed : StatusResult()
+    }
+
     private val http by lazy {
         OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS).build()
     }
 
-    /** Returns the session token, or null for a wrong/spent PIN or unreachable server. */
-    fun pair(serverHttpUrl: String, pin: String): String? {
-        val body = JSONObject().put("pin", pin).toString()
+    fun request(serverHttpUrl: String, deviceId: String, deviceName: String): RequestResult {
+        val body = JSONObject().put("id", deviceId).put("name", deviceName).toString()
             .toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url("$serverHttpUrl/pair").post(body).build()
+        val request = Request.Builder().url("$serverHttpUrl/pair/request").post(body).build()
         return try {
             http.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val token = JSONObject(resp.body?.string() ?: return@use null)
-                    .optString("token")
-                if (token.isNotEmpty()) token else null
+                when (resp.code) {
+                    200 -> {
+                        val token = JSONObject(resp.body?.string() ?: "").optString("token")
+                        if (token.isNotEmpty()) RequestResult.Approved(token) else RequestResult.Failed
+                    }
+                    202 -> {
+                        val id = JSONObject(resp.body?.string() ?: "").optString("requestId")
+                        if (id.isNotEmpty()) RequestResult.Pending(id) else RequestResult.Failed
+                    }
+                    429 -> RequestResult.TooManyRequests
+                    else -> RequestResult.Failed
+                }
             }
         } catch (e: Exception) {
-            null
+            RequestResult.Failed
+        }
+    }
+
+    fun status(serverHttpUrl: String, requestId: String): StatusResult {
+        val url = "$serverHttpUrl/pair/status".toHttpUrl().newBuilder()
+            .addQueryParameter("id", requestId).build()
+        val request = Request.Builder().url(url).get().build()
+        return try {
+            http.newCall(request).execute().use { resp ->
+                // The server answers an expired request with HTTP 410 and
+                // {"state":"expired"}; both spellings map to Expired so the
+                // UI can ask the user to tap Conectar again.
+                if (resp.code == 410) return@use StatusResult.Expired
+                if (!resp.isSuccessful) return@use StatusResult.Failed
+                val json = JSONObject(resp.body?.string() ?: "")
+                when (json.optString("state")) {
+                    "pending" -> StatusResult.Pending
+                    "approved" -> {
+                        val token = json.optString("token")
+                        // The server returns this token only once; the caller stores it immediately.
+                        if (token.isNotEmpty()) StatusResult.Approved(token) else StatusResult.Failed
+                    }
+                    "denied" -> StatusResult.Denied
+                    "expired" -> StatusResult.Expired
+                    else -> StatusResult.Failed
+                }
+            }
+        } catch (e: Exception) {
+            StatusResult.Failed
         }
     }
 }

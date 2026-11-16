@@ -1,13 +1,19 @@
 package com.clipboardshare
 
 import android.content.Context
+import android.os.Build
+import java.util.UUID
 
-/**
- * Persists the pairing session token. The token is only valid for the current
- * server process; a 401 on connect clears it and the PIN flow restarts.
- */
+/** Persistent device identity and the latest token approved for that identity. */
 class SessionStore(context: Context) {
     private val prefs = context.getSharedPreferences("input_control", Context.MODE_PRIVATE)
+
+    val deviceId: String = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also {
+        prefs.edit().putString("device_id", it).apply()
+    }
+
+    val deviceName: String
+        get() = Build.MODEL
 
     var token: String?
         get() = prefs.getString("token", null)
