@@ -79,3 +79,9 @@ sobreviviendo reinicios de ambos lados.
 - L2 — Decisión de opción: el usuario eligió "A + aprobación en el PC"
   (persistencia de estado + trust-on-first-pair aprobado en el PC). El PIN
   se elimina.
+- L3 — Workers T1-T3 completados. Cross-check del padre: el server responde
+  410 en expired y Android lo traducía a Failed (nunca llegaba al UI de
+  Expired); corregido mapeando 410→Expired en InputClient.status(). Nota:
+  S3/S6 mencionaban vínculo token↔IP heredado del WIP descartado de la
+  sesión paralela; el código real valida solo token, y ambos workers lo
+  conservaron correctamente (Validate(token)).

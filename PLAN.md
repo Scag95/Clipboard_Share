@@ -38,14 +38,19 @@ Documento para retomar el trabajo en otro equipo/entorno.
 - Documentar en README los pasos de build release.
 
 ### 5. Seguridad / robustez
-- Autenticación simple (token compartido) entre PC y móvil. ✅ Hecho en rama
-  `feat/input-control` (pairing por PIN de 6 dígitos + token de sesión para
-  `/ws/input`; el clipboard aún sin auth). Pendiente extender auth al clipboard.
+- ~~Autenticación simple (token compartido)~~ ✅ Evolucionó: pairing por
+  identidad de dispositivo con aprobación en el PC y tokens persistidos
+  (`odd/tasks/transparent-pairing.md`); sin PIN. Pendiente extender auth al
+  clipboard.
 - Validar tamaño máximo de imagen. ✅ Hecho (10 MiB, responde 413).
-- Manejo de errores de red y reconexión automática: el polling de Android ya
-  reintenta solo; falta backoff y notificación de estado.
+- Reconexión automática: ✅ pairing re-emite token tras reboot del server;
+  el polling de Android reintenta solo. Falta backoff y notificación de
+  estado en la UI de MainActivity.
 - El server no usa `http.MaxBytesReader` (el límite actual lee con
   `io.LimitReader`, que no cierra la conexión early). Menor.
+- TLS pendiente: token y eventos viajan por http/ws plano en la LAN; el
+  token revocado se aplica en la próxima conexión (no corta un WebSocket
+  vivo). Aceptable para beta personal; documentado en README.
 
 ### 6. Mejoras de UX
 - Notificación de estado de conexión.

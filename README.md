@@ -95,13 +95,14 @@ Endpoints:
 - `GET  /clipboard/image` — imagen actual del clipboard (PNG); `204` si no hay imagen.
 - `POST /clipboard/image` — escribe imagen al clipboard (body binario PNG).
   Tamaño máximo: 10 MiB; si se excede responde `413` sin tocar el clipboard.
-- `POST /pair` — pairing por PIN: body `{"pin":"123456"}` (el PIN de 6 dígitos
-  que el server imprime al arrancar). Devuelve `200` con `{"token":"..."}` si
-  es correcto, `401` si es incorrecto o ya no vale, `400` si el body está mal.
-  Tras 5 intentos seguidos fallidos el PIN se rota y se imprime uno nuevo.
-  Tras 5 rotaciones (25 intentos en total) el pairing queda bloqueado para la
-  sesión y `/pair` responde `423` aunque el PIN sea correcto; se recupera
-  reiniciando el server.
+- `POST /pair/request` — body `{"id":"<uuid dispositivo>","name":"<modelo>"}`.
+  Dispositivo ya aprobado → `200 {"token":"..."}` inmediato (reconexión
+  transparente, el token anterior se revoca). Desconocido → `202
+  {"requestId":"..."}` y notificación en el PC para aprobar; el request
+  caduca a los 90 s. Más de 5 requests pendientes de la misma IP → `429`.
+- `GET  /pair/status?id=<requestId>` — `pending`; al aprobar, `200
+  {"state":"approved","token":"..."}` **una sola vez**; si se denegó, `200
+  denied`; si venció, `410 expired`.
 - `GET  /ws/input?token=<token>` — WebSocket de control remoto. Sin token
   válido responde `401` antes del upgrade. Los eventos se envían como objetos
   JSON (uno por frame):
@@ -119,18 +120,39 @@ Endpoints:
 
 ## Control remoto (mouse + teclado)
 
-El server puede recibir input del teléfono (rama `feat/input-control`,
-especificación en `odd/tasks/input-control.md`):
+El server puede recibir input del teléfono (especificación en
+`odd/tasks/input-control.md` y `odd/tasks/transparent-pairing.md`):
 
-1. Arrancar el server; anotar el **Pairing PIN** que imprime en la consola.
-2. En el teléfono, ingresar el PIN → se obtiene un token de sesión (`/pair`).
-3. La app abre `/ws/input` con el token y envía eventos (touchpad + teclado).
+1. En el teléfono, tocar **Conectar** en la pantalla de control remoto.
+2. En el PC aparece una notificación; aprobar el dispositivo:
+
+   ```bash
+   clipboard-share pair --last   # aprueba el request más nuevo
+   clipboard-share pair list     # ver pendientes y aprobados
+   clipboard-share pair revoke --device <id>   # quitar un dispositivo
+   ```
+
+3. El celu guarda el token y abre `/ws/input`. **Las reconexiones siguientes
+   son automáticas**: el server reconoce el UUID del dispositivo y re-emite
+   token sin aprobación; el estado (dispositivos y tokens) persiste en
+   `~/.config/clipboard-share/state.json` (`0600`) y sobrevive reinicios del
+   server y de la PC.
+
+Atajo recomendado para Hyprland (`~/.config/hypr/hyprland.conf`), que además
+deja de depender de la notificación:
+
+```ini
+bind = SUPER SHIFT, P, exec, clipboard-share pair --last
+```
+
+Si se pierde un teléfono: `clipboard-share pair revoke --device <id>`; para
+resetear todo el pairing, borrar `state.json`.
 
 En Windows la inyección usa `SendInput` (sin cgo, build tag `windows`); en
 Linux usa `/dev/uinput` (requiere el permiso de la sección “Permisos
 uinput”; sin acceso, el server registra eventos en un stub, útil para
-desarrollo). El clipboard sigue sin autenticación por ahora; el control de
-input **no**.
+desarrollo; el log de arranque indica qué modo está activo). El clipboard
+sigue sin autenticación por ahora; el control de input **no**.
 
 ## Generar binario
 
@@ -162,9 +184,10 @@ sync en background (la app sincroniza mientras está abierta).
 - Servidor Go con clipboard real de Windows **y Linux** (texto + imagen; en
   Wayland vía `wl-clipboard`), apagado ordenado (graceful shutdown) y límites
   de tamaño en la API.
-- Control remoto mouse + teclado en rama `feat/input-control`: pairing por PIN,
-  stream WebSocket con validación estricta, límites de tasa y `SendInput` en
-  Windows (texto unicode, teclas nombradas, shortcuts con modificadores).
+- Control remoto mouse + teclado: pairing por identidad de dispositivo con
+  aprobación en el PC (sin PIN), estado persistido, stream WebSocket con
+  validación estricta y límites de tasa; `SendInput` en Windows y `uinput` en
+  Linux.
 - Cliente Android: descubrimiento mDNS (NSD), sincronización bidireccional de
   texto e imágenes (PNG) con listener del clipboard y polling cada 2 s.
 - Tests: handlers HTTP del server, broker de pairing, parser de eventos y
