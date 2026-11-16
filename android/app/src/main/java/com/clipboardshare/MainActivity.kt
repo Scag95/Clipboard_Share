@@ -1,10 +1,13 @@
 package com.clipboardshare
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -27,6 +30,7 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         const val TAG = "ClipboardShare"
         const val SERVICE_TYPE = "_clipboard-share._tcp."
+        const val NOTIFICATION_PERMISSION_REQUEST = 1001
     }
 
     private lateinit var nsdManager: NsdManager
@@ -54,6 +58,7 @@ class MainActivity : AppCompatActivity() {
         hostList = findViewById(R.id.hostList)
         statusText = findViewById(R.id.statusText)
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
+        if (store.selectedHost != null) startClipboardSync()
         renderHosts()
         startDiscovery()
     }
@@ -214,10 +219,25 @@ class MainActivity : AppCompatActivity() {
     private fun openRemote(host: SessionStore.LastHost) {
         val selected = host.copy(lastConnected = System.currentTimeMillis())
         store.putLastHost(selected)
+        startClipboardSync()
         startActivity(
             Intent(this, RemoteControlActivity::class.java)
                 .putExtra("server_url", serverUrl(selected))
         )
+    }
+
+    private fun startClipboardSync() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTIFICATION_PERMISSION_REQUEST,
+            )
+        }
+        ClipboardSyncService.ensureStarted(this)
     }
 
     private fun serverUrl(host: SessionStore.LastHost): String {

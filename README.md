@@ -176,8 +176,10 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-La beta es de uso personal: APK debug por USB/`adb`, sin Play Store y sin
-sync en background (la app sincroniza mientras está abierta).
+La beta es de uso personal: APK debug por USB/`adb` o `adb connect` por Wi-Fi,
+sin Play Store. El sync de clipboard corre en segundo plano apenas elegís un
+host (con notificación persistente, requisito de Android); el control remoto
+requiere la pantalla abierta.
 
 ## Estado del proyecto
 
@@ -188,7 +190,11 @@ sync en background (la app sincroniza mientras está abierta).
   aprobación en el PC (sin PIN), estado persistido, stream WebSocket con
   validación estricta y límites de tasa; `SendInput` en Windows y `uinput` en
   Linux.
-- Cliente Android: descubrimiento mDNS (NSD), sincronización bidireccional de
-  texto e imágenes (PNG) con listener del clipboard y polling cada 2 s.
+- Cliente Android: home con lista de hosts (vivos + recordados), tokens por
+  host con reconexión transparente, sincronización bidireccional de texto e
+  imágenes (PNG) en **segundo plano** vía ForegroundService atado al último
+  host elegido (tras reiniciar el teléfono alcanza con abrir la app una vez
+  para reactivar el servicio), y control remoto (trackpad + teclado + botones
+  de click) en su propia pantalla.
 - Tests: handlers HTTP del server, broker de pairing, parser de eventos y
   stream WebSocket (`internal/api`, `internal/pair`, `internal/input`).

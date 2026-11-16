@@ -20,10 +20,11 @@ Documento para retomar el trabajo en otro equipo/entorno.
 - Guardar la IP en SharedPreferences y usarla si el descubrimiento falla.
 
 ### 2. Sincronización en background
-- Usar un `ForegroundService` en Android para mantener la sync activa
-  mientras la app está en segundo plano.
-- Polling periódico (WorkManager o coroutine con delay) para detectar cambios
-  en el clipboard sin interacción del usuario.
+- ✅ Hecho (`odd/tasks/background-sync.md`): `ClipboardSyncService`
+  (ForegroundService dataSync) con listener + polling 2 s, notificación de
+  estado y reconexión automática tras caídas del server. Limitación conocida:
+  tras reinicio del teléfono el servicio se reactiva al abrir la app una vez
+  (Android bloquea FGS desde BOOT_COMPLETED).
 
 ### 3. Tests
 - Go: tests unitarios para los handlers HTTP (`internal/api`). ✅ Hecho.

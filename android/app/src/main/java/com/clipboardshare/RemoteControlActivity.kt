@@ -1,18 +1,11 @@
 package com.clipboardshare
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.util.Log
 import android.view.View
 import android.widget.Button
@@ -27,13 +20,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-import java.io.ByteArrayOutputStream
-import java.util.concurrent.TimeUnit
 
 /**
  * Remote mouse, keyboard, and clipboard for the host selected on the home screen.
@@ -43,24 +29,11 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "ClipboardShareRemote"
-        const val POLL_MS = 2_000L
-    }
-
-    /** Snapshot of one clipboard content: either text or PNG bytes, not both. */
-    private class ClipItem(val isImage: Boolean, val text: String?, val png: ByteArray?) {
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is ClipItem) return false
-            if (isImage != other.isImage || text != other.text) return false
-            return png?.contentEquals(other.png ?: ByteArray(0)) ?: (other.png == null)
-        }
-
-        override fun hashCode(): Int =
-            if (isImage) png?.contentHashCode() ?: 0 else text?.hashCode() ?: 0
     }
 
     private val client = InputClient()
     private val handler = Handler(Looper.getMainLooper())
+    private val clipboardStatusHandler = Handler(Looper.getMainLooper())
     private lateinit var store: SessionStore
     private lateinit var serverUrl: String
     private lateinit var hostKey: String
@@ -75,19 +48,16 @@ class RemoteControlActivity : AppCompatActivity() {
     private var retryScheduled = false
     private var authRetryInFlight = false
 
-    private val clipboardClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
-    private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
     private lateinit var shareImages: CheckBox
     private val clipPrefs by lazy { getSharedPreferences("clip_settings", Context.MODE_PRIVATE) }
-
-    /** Opt-in shared globally through the existing clip_settings/share_images preference. */
-    @Volatile private var shareImagesEnabled = false
-
-    /** Last content this device has already propagated in both directions for this host. */
-    @Volatile private var lastSyncedItem: ClipItem? = null
+    private val clipboardStatusPoller = object : Runnable {
+        override fun run() {
+            if (::clipboardStatusText.isInitialized) {
+                clipboardStatusText.text = ClipboardSyncService.clipboardStatus
+            }
+            clipboardStatusHandler.postDelayed(this, 500L)
+        }
+    }
 
     private val wsListener = object : InputClient.Listener {
         override fun onConnected() {
@@ -141,6 +111,7 @@ class RemoteControlActivity : AppCompatActivity() {
         hostKey = serverUrl.substringAfter("://")
         store = SessionStore(this)
         store.selectedHost = hostKey
+        ClipboardSyncService.ensureStarted(this)
 
         setContentView(R.layout.activity_remote_control)
         statusText = findViewById(R.id.rcStatus)
@@ -150,10 +121,8 @@ class RemoteControlActivity : AppCompatActivity() {
         cancelPairingButton = findViewById(R.id.btnCancelPairing)
 
         shareImages = findViewById(R.id.cbShareImages)
-        shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
-        shareImages.isChecked = shareImagesEnabled
+        shareImages.isChecked = clipPrefs.getBoolean("share_images", false)
         shareImages.setOnCheckedChangeListener { _, checked ->
-            shareImagesEnabled = checked
             clipPrefs.edit().putBoolean("share_images", checked).apply()
         }
 
@@ -208,12 +177,12 @@ class RemoteControlActivity : AppCompatActivity() {
 
         setStatus("Preparando conexión con $serverUrl…")
         maybeRequestStoragePermission()
-        startClipListener()
-        startSyncLoop()
     }
 
     override fun onResume() {
         super.onResume()
+        clipboardStatusHandler.removeCallbacks(clipboardStatusPoller)
+        clipboardStatusHandler.post(clipboardStatusPoller)
         if (!::store.isInitialized || client.connected || pairingJob?.isActive == true) return
         manualDisconnect = false
         if (store.getToken(hostKey) != null) {
@@ -223,16 +192,17 @@ class RemoteControlActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        clipboardStatusHandler.removeCallbacks(clipboardStatusPoller)
+        super.onPause()
+    }
+
     override fun onDestroy() {
         manualDisconnect = true
         pairingJob?.cancel()
         handler.removeCallbacksAndMessages(null)
+        clipboardStatusHandler.removeCallbacksAndMessages(null)
         client.disconnect()
-        clipListener?.let { listener ->
-            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.removePrimaryClipChangedListener(listener)
-        }
-        clipListener = null
         super.onDestroy()
     }
 
@@ -359,12 +329,6 @@ class RemoteControlActivity : AppCompatActivity() {
         statusText.text = text
     }
 
-    private fun setClipboardStatus(text: String) {
-        runOnUiThread {
-            if (!isFinishing && !isDestroyed) clipboardStatusText.text = text
-        }
-    }
-
     /** MediaStore writes on API 24-28 need WRITE_EXTERNAL_STORAGE; 29+ uses scoped storage. */
     private fun maybeRequestStoragePermission() {
         if (Build.VERSION.SDK_INT >= 29) return
@@ -375,175 +339,4 @@ class RemoteControlActivity : AppCompatActivity() {
         }
     }
 
-    private fun startClipListener() {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val listener = ClipboardManager.OnPrimaryClipChangedListener {
-            // A copy on the device syncs immediately instead of waiting for the next poll.
-            lifecycleScope.launch(Dispatchers.IO) { runSync() }
-        }
-        clipListener = listener
-        cm.addPrimaryClipChangedListener(listener)
-    }
-
-    private fun startSyncLoop() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            while (isActive) {
-                runSync()
-                delay(POLL_MS)
-            }
-        }
-    }
-
-    /**
-     * One sync step against the selected host. Local changes win over remote
-     * ones; lastSyncedItem prevents content from echoing back to its source.
-     */
-    private fun runSync() {
-        try {
-            val local = readLocalClip()
-            if (local != null && local != lastSyncedItem) {
-                if (local.isImage && !shareImagesEnabled) {
-                    // Do not let remote content overwrite an unsent local image.
-                    lastSyncedItem = local
-                    setClipboardStatus("Imagen local no compartida")
-                    return
-                }
-                if (!push(serverUrl, local)) {
-                    // Retry on the next poll because the server did not accept it.
-                    Log.e(TAG, "push failed; item not marked synced")
-                    setClipboardStatus("Error al enviar el portapapeles")
-                    return
-                }
-                lastSyncedItem = local
-                setClipboardStatus("Portapapeles sincronizado")
-                return
-            }
-            val remote = fetchRemoteClip(serverUrl)
-            if (remote != null && remote != lastSyncedItem) {
-                if (local?.isImage == true && !shareImagesEnabled) return
-                applyRemote(remote)
-                lastSyncedItem = remote
-                setClipboardStatus("Portapapeles sincronizado")
-            } else {
-                setClipboardStatus("Sincronización activa")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Sync error: ${e.message}")
-            setClipboardStatus("Sin conexión con el host")
-        }
-    }
-
-    private fun readLocalClip(): ClipItem? {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = cm.primaryClip ?: return null
-        if (clip.itemCount == 0) return null
-        val item = clip.getItemAt(0)
-        val isImage = clip.description.hasMimeType("image/*")
-        if (isImage) {
-            val uri = item.uri ?: return null
-            val bmp = try {
-                contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
-            } catch (e: Exception) {
-                Log.e(TAG, "Cannot read local image: ${e.message}")
-                null
-            } ?: return null
-            val out = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-            bmp.recycle()
-            return ClipItem(true, null, out.toByteArray())
-        }
-        val text = item.coerceToText(this).toString()
-        if (text.isEmpty()) return null
-        return ClipItem(false, text, null)
-    }
-
-    /** Push returns true only when the server accepted the content (2xx). */
-    private fun push(url: String, item: ClipItem): Boolean {
-        return if (item.isImage) {
-            setImage(url, item.png ?: ByteArray(0))
-        } else {
-            setText(url, item.text ?: "")
-        }
-    }
-
-    private fun applyRemote(item: ClipItem) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        if (item.isImage) {
-            val uri = saveImageToMediaStore(item.png ?: ByteArray(0)) ?: return
-            cm.setPrimaryClip(ClipData.newUri(contentResolver, "shared", uri))
-        } else {
-            cm.setPrimaryClip(ClipData.newPlainText("shared", item.text ?: ""))
-        }
-    }
-
-    private fun saveImageToMediaStore(png: ByteArray): Uri? {
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "clipboard_share_${System.currentTimeMillis()}.png")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-        }
-        val uri = contentResolver.insert(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            values,
-        ) ?: return null
-        return try {
-            contentResolver.openOutputStream(uri)?.use { it.write(png) }
-            uri
-        } catch (e: Exception) {
-            Log.e(TAG, "Cannot save image: ${e.message}")
-            contentResolver.delete(uri, null, null)
-            null
-        }
-    }
-
-    private fun fetchRemoteClip(url: String): ClipItem? {
-        if (shareImagesEnabled) {
-            getImage(url)?.let { if (it.isNotEmpty()) return ClipItem(true, null, it) }
-        }
-        val text = getText(url)
-        if (!text.isNullOrEmpty()) return ClipItem(false, text, null)
-        return null
-    }
-
-    private fun getText(url: String): String? {
-        val req = Request.Builder().url("$url/clipboard/text").get().build()
-        clipboardClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
-            val body = resp.body?.string() ?: return null
-            return JSONObject(body).optString("text", "")
-        }
-    }
-
-    private fun setText(url: String, text: String): Boolean {
-        val json = JSONObject().put("text", text).toString()
-        val body = json.toRequestBody("application/json".toMediaType())
-        val req = Request.Builder().url("$url/clipboard/text").post(body).build()
-        clipboardClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                Log.e(TAG, "setText push: HTTP ${resp.code}")
-                return false
-            }
-            return true
-        }
-    }
-
-    private fun getImage(url: String): ByteArray? {
-        val req = Request.Builder().url("$url/clipboard/image").get().build()
-        clipboardClient.newCall(req).execute().use { resp ->
-            if (resp.code == 204) return null
-            if (!resp.isSuccessful) return null
-            return resp.body?.bytes()
-        }
-    }
-
-    private fun setImage(url: String, data: ByteArray): Boolean {
-        val body = data.toRequestBody("image/png".toMediaType())
-        val req = Request.Builder().url("$url/clipboard/image").post(body).build()
-        clipboardClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                Log.e(TAG, "setImage push: HTTP ${resp.code}")
-                return false
-            }
-            return true
-        }
-    }
 }
