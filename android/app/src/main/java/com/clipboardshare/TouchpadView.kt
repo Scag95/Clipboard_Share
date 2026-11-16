@@ -1,7 +1,6 @@
 package com.clipboardshare
 
 import android.content.Context
-import android.graphics.Color
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -56,7 +55,7 @@ class TouchpadView @JvmOverloads constructor(
     }
 
     init {
-        setBackgroundColor(Color.rgb(26, 26, 30))
+        setBackgroundResource(R.drawable.trackpad_surface)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

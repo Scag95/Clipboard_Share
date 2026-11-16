@@ -187,9 +187,3 @@ object PairingClient {
         }
     }
 }
-
-/** Where the last discovered server lives; shared between the two screens. */
-object ServerRepo {
-    @Volatile
-    var url: String? = null
-}

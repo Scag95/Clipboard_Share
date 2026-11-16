@@ -9,20 +9,20 @@
         android:id="@+id/statusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Buscando servidor..."
+        android:padding="8dp"
+        android:text="Buscando dispositivos…"
         android:textSize="16sp" />
 
-    <CheckBox
-        android:id="@+id/cbShareImages"
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Sincronizar imágenes del clipboard" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
 
-    <Button
-        android:id="@+id/remoteButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="Control remoto (mouse y teclado)" />
+        <LinearLayout
+            android:id="@+id/hostList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
 </LinearLayout>
