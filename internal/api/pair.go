@@ -2,65 +2,104 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
-	"regexp"
 
 	"github.com/gorilla/mux"
+
+	"clipboard-share/internal/pair"
 )
 
-// Pairer exchanges a displayed PIN for a session token (implemented by
+// Pairer starts device pairing and polls its state (implemented by
 // internal/pair.Broker).
 type Pairer interface {
-	Pair(pin string) (token string, ok bool)
-	// Locked reports that pairing exhausted its lifetime failed-attempt cap
-	// and refuses every PIN until the server restarts.
-	Locked() bool
+	Request(id, name, ip string) (pair.RequestResult, error)
+	Status(requestID, ip string) (pair.StatusResult, error)
 }
 
 type pairRequest struct {
-	Pin string `json:"pin"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
-type pairResponse struct {
-	Token string `json:"token"`
-}
-
-var pinPattern = regexp.MustCompile(`^[0-9]{6}$`)
-
-// AttachPairing registers the pairing endpoint on r. POST /pair with
-// {"pin":"<6 digits>"} returns 200 and {"token":"..."} when the PIN is
-// correct, 401 when it is wrong or spent, 400 for a malformed request, and
-// 423 once the lifetime failed-attempt cap is exhausted (pairing locked
-// until restart; see pair.MaxRotations).
+// AttachPairing registers device-identity pairing endpoints. POST
+// /pair/request returns 200 with a rotated token for known devices, 202 with
+// a requestId for new devices, and 429 when a source IP has too many pending
+// requests. GET /pair/status?id=... is source-IP bound and returns approval
+// tokens only once.
 func AttachPairing(r *mux.Router, p Pairer) {
 	h := &pairHandlers{pairer: p}
-	r.HandleFunc("/pair", h.pair).Methods("POST")
+	r.HandleFunc("/pair/request", h.request).Methods("POST")
+	r.HandleFunc("/pair/status", h.status).Methods("GET")
 }
 
 type pairHandlers struct {
 	pairer Pairer
 }
 
-func (h *pairHandlers) pair(w http.ResponseWriter, r *http.Request) {
+func (h *pairHandlers) request(w http.ResponseWriter, r *http.Request) {
 	var req pairRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<10)).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if !pinPattern.MatchString(req.Pin) {
-		http.Error(w, "pin must be 6 digits", http.StatusBadRequest)
+	if req.ID == "" || req.Name == "" {
+		http.Error(w, "id and name are required", http.StatusBadRequest)
 		return
 	}
-	token, ok := h.pairer.Pair(req.Pin)
-	if !ok {
-		if h.pairer.Locked() {
-			http.Error(w, "pairing locked: too many failed attempts; restart the server", http.StatusLocked)
-			return
-		}
-		http.Error(w, "invalid pin", http.StatusUnauthorized)
+	result, err := h.pairer.Request(req.ID, req.Name, remoteIP(r))
+	if errors.Is(err, pair.ErrTooManyPending) {
+		http.Error(w, "too many pending pair requests from this IP", http.StatusTooManyRequests)
 		return
 	}
+	if errors.Is(err, pair.ErrInvalid) {
+		http.Error(w, "id and name are required", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(w, "could not create pair request", http.StatusInternalServerError)
+		return
+	}
+	status := http.StatusAccepted
+	if result.Token != "" {
+		status = http.StatusOK
+	}
+	writePairJSON(w, status, result)
+}
+
+func (h *pairHandlers) status(w http.ResponseWriter, r *http.Request) {
+	requestID := r.URL.Query().Get("id")
+	if requestID == "" {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+	result, err := h.pairer.Status(requestID, remoteIP(r))
+	switch {
+	case errors.Is(err, pair.ErrExpired):
+		writePairJSON(w, http.StatusGone, result)
+	case errors.Is(err, pair.ErrForbidden):
+		http.Error(w, "pair request belongs to a different IP", http.StatusForbidden)
+	case errors.Is(err, pair.ErrNotFound):
+		http.Error(w, "pair request not found", http.StatusNotFound)
+	case err != nil:
+		http.Error(w, "could not read pair request", http.StatusInternalServerError)
+	default:
+		writePairJSON(w, http.StatusOK, result)
+	}
+}
+
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+func writePairJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(pairResponse{Token: token})
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }

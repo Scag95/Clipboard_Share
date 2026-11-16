@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 func newInputServer(t *testing.T, rate int) (url string, b *pair.Broker, rec *input.Recorder) {
 	t.Helper()
+	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	b = pair.NewBroker()
 	rec = &input.Recorder{}
 	r := mux.NewRouter()
@@ -25,6 +27,22 @@ func newInputServer(t *testing.T, rate int) (url string, b *pair.Broker, rec *in
 	s := httptest.NewServer(r)
 	t.Cleanup(s.Close)
 	return s.URL, b, rec
+}
+
+func inputToken(t *testing.T, b *pair.Broker) string {
+	t.Helper()
+	req, err := b.Request("input-device", "Test Phone", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Approve(req.RequestID); err != nil {
+		t.Fatal(err)
+	}
+	status, err := b.Status(req.RequestID, "127.0.0.1")
+	if err != nil || status.Token == "" {
+		t.Fatalf("approved token status = %+v, err = %v", status, err)
+	}
+	return status.Token
 }
 
 func dial(t *testing.T, url, token string) (*websocket.Conn, int) {
@@ -71,24 +89,21 @@ func TestInputWSRejectsMissingOrBadToken(t *testing.T) {
 	}
 }
 
-func TestInputWSRejectsSpentPinTokenDomain(t *testing.T) {
+func TestInputWSRejectsRevokedToken(t *testing.T) {
 	url, b, _ := newInputServer(t, 120)
-	// A token from a wrong PIN exchange must never connect.
-	if _, ok := b.Pair("000001"); ok && b.Pin() != "000001" {
-		t.Skip("PIN collision")
+	tok := inputToken(t, b)
+	if err := b.Revoke("input-device"); err != nil {
+		t.Fatal(err)
 	}
-	conn, code := dial(t, url, "deadbeef")
+	conn, code := dial(t, url, tok)
 	if conn != nil || code != http.StatusUnauthorized {
-		t.Fatalf("unissued token connected (code %d)", code)
+		t.Fatalf("revoked token connected (code %d)", code)
 	}
 }
 
 func TestInputWSAcceptedEventReachesInjector(t *testing.T) {
 	url, b, rec := newInputServer(t, 120)
-	tok, ok := b.Pair(b.Pin())
-	if !ok {
-		t.Fatal("pairing failed")
-	}
+	tok := inputToken(t, b)
 	conn, code := dial(t, url, tok)
 	if code != http.StatusOK {
 		t.Fatalf("dial status %d", code)
@@ -110,7 +125,7 @@ func TestInputWSAcceptedEventReachesInjector(t *testing.T) {
 
 func TestInputWSInvalidEventGetsErrorFrameAndStaysOpen(t *testing.T) {
 	url, b, rec := newInputServer(t, 120)
-	tok, _ := b.Pair(b.Pin())
+	tok := inputToken(t, b)
 	conn, _ := dial(t, url, tok)
 
 	// S6: bad payloads answer {"error": ...} without closing the connection.
@@ -149,7 +164,7 @@ func TestInputWSInvalidEventGetsErrorFrameAndStaysOpen(t *testing.T) {
 
 func TestInputWSRateLimit(t *testing.T) {
 	url, b, rec := newInputServer(t, 5) // 5 events/s, burst 5
-	tok, _ := b.Pair(b.Pin())
+	tok := inputToken(t, b)
 	conn, _ := dial(t, url, tok)
 
 	errs := 0
@@ -181,7 +196,7 @@ func TestInputWSRateLimit(t *testing.T) {
 
 func TestInputWSOverlongFrameRejected(t *testing.T) {
 	url, b, _ := newInputServer(t, 120)
-	tok, _ := b.Pair(b.Pin())
+	tok := inputToken(t, b)
 	conn, _ := dial(t, url, tok)
 	huge := map[string]any{"type": "text", "chars": strings.Repeat("x", 10000)}
 	if err := conn.WriteJSON(huge); err != nil {
