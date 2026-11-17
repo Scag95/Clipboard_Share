@@ -116,15 +116,18 @@ class ClipboardTriggerPolicy(private val clock: () -> Long) {
 
     /**
      * Records that we are about to write the clipboard ourselves. The system logs a
-     * denial for that write too; it must not bring up the read window. Returns the
-     * length of the quiet window, after which [takeDeferredTrigger] must be checked.
+     * denial for that write too (unless our app has focus: [expectEcho] false); it must
+     * not bring up the read window. Returns the length of the quiet window, after which
+     * [takeDeferredTrigger] must be checked.
      */
     @Synchronized
-    fun onOwnClipWrite(): Long {
+    fun onOwnClipWrite(expectEcho: Boolean = true): Long {
         val now = clock()
         if (now >= suppressTriggersUntil) expectedOwnEchoes = 0
         suppressTriggersUntil = now + OWN_CHANGE_QUIET_MS
-        expectedOwnEchoes++
+        // With our app focused the system logs no denial for the write, so no echo is
+        // coming; counting one would swallow a real copy made right after we leave.
+        if (expectEcho) expectedOwnEchoes++
         return OWN_CHANGE_QUIET_MS
     }
 

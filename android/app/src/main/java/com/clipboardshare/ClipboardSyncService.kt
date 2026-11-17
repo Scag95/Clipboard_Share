@@ -377,7 +377,8 @@ class ClipboardSyncService : Service() {
 
     /** Our own writes also make the system log a denial for us; those must not trigger a read. */
     private fun setClipQuietly(clip: ClipData) {
-        val quietMs = triggerPolicy.onOwnClipWrite()
+        // No denial is logged for a write made while our app has focus.
+        val quietMs = triggerPolicy.onOwnClipWrite(expectEcho = !appVisible())
         // A real copy suppressed inside the quiet window is fired when it ends.
         mainHandler.removeCallbacks(quietWindowEnded)
         mainHandler.postDelayed(quietWindowEnded, quietMs)
@@ -494,6 +495,8 @@ class ClipboardSyncService : Service() {
     }
 
     private fun onClipboardChangeDetected() {
+        // A watcher thread can still be mid-line when the service is destroyed.
+        if (!syncStarted || !isCurrentLogWatcher()) return
         if (appVisible()) return
         if (!Settings.canDrawOverlays(this)) {
             Log.w(TAG, "bg trigger ignored: overlay permission missing")

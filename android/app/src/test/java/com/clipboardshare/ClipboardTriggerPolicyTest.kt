@@ -142,6 +142,17 @@ class ClipboardTriggerPolicyTest {
         assertFalse(policy.takeDeferredTrigger())
     }
 
+    // Writing the clipboard while our app has focus makes the system log no denial, so
+    // no echo is coming: a trigger inside the quiet window is a real copy, not an echo.
+    @Test
+    fun ownWriteWithTheAppVisibleExpectsNoEchoSoACopyRightAfterIsKept() {
+        policy.onOwnClipWrite(expectEcho = false)
+        now += 200
+        assertEquals(TriggerDecision.DeferredUntilQuietEnds, policy.onTrigger())
+        now += OWN_CHANGE_QUIET_MS
+        assertTrue(policy.takeDeferredTrigger())
+    }
+
     @Test
     fun userCopyDuringTheQuietWindowFiresOnceWhenTheWindowEnds() {
         policy.onOwnClipWrite()
