@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Clipboard Share
+Name[es]=Clipboard Share
+Comment=Approve phones and manage paired devices
+Comment[es]=Aprueba teléfonos y administra los dispositivos emparejados
+Exec=clipboard-share-panel --background
+Icon=clipboard-share
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

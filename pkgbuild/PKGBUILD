@@ -1,0 +1,51 @@
+# Maintainer: Clipboard Share contributors
+pkgname=clipboard-share
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Share the clipboard and remote input between phones and a Linux desktop'
+arch=('x86_64')
+license=('MIT')
+depends=('wl-clipboard' 'qt6-base' 'qt6-declarative' 'qt6-wayland')
+makedepends=('go')
+options=('!lto')
+source=()
+
+_repo="$startdir/.."
+
+prepare() {
+  rm -rf "$srcdir/$pkgname"
+  mkdir -p "$srcdir/$pkgname/pkgbuild"
+  # Copy only the sources needed to build; never build inside the repo tree.
+  tar -C "$_repo" --exclude='panel/build' -cf - go.mod go.sum cmd internal panel \
+    | tar -C "$srcdir/$pkgname" -xf -
+  # The panel resources reference ../../pkgbuild/clipboard-share.svg.
+  cp "$_repo/pkgbuild/clipboard-share.svg" "$srcdir/$pkgname/pkgbuild/"
+}
+
+build() {
+  cd "$srcdir/$pkgname"
+  export CGO_CPPFLAGS="$CPPFLAGS"
+  export CGO_CFLAGS="$CFLAGS"
+  export CGO_CXXFLAGS="$CXXFLAGS"
+  export CGO_LDFLAGS="$LDFLAGS"
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  go build -o clipboard-share ./cmd/server
+
+  sh panel/bin/build
+}
+
+package() {
+  cd "$srcdir/$pkgname"
+  install -Dm755 clipboard-share "$pkgdir/usr/bin/clipboard-share"
+  install -Dm755 panel/build/clipboard-share-panel "$pkgdir/usr/bin/clipboard-share-panel"
+  install -Dm644 "$startdir/clipboard-share.service" \
+    "$pkgdir/usr/lib/systemd/user/clipboard-share.service"
+  install -Dm644 "$startdir/99-clipboard-share-uinput.rules" \
+    "$pkgdir/usr/lib/udev/rules.d/99-clipboard-share-uinput.rules"
+  install -Dm644 "$startdir/clipboard-share.desktop" \
+    "$pkgdir/usr/share/applications/clipboard-share.desktop"
+  install -Dm644 "$startdir/clipboard-share-panel-autostart.desktop" \
+    "$pkgdir/etc/xdg/autostart/clipboard-share-panel.desktop"
+  install -Dm644 "$startdir/clipboard-share.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/clipboard-share.svg"
+}

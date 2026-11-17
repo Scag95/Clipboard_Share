@@ -1,0 +1,2 @@
+# Let the active local session user open /dev/uinput (remote input) without the input group.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
