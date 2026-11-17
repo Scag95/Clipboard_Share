@@ -316,7 +316,7 @@ class ClipboardSyncService : Service() {
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
             val statusSuffix = if (canReadLocal) "" else backgroundStatusSuffix()
             val local = capturedLocal ?: if (canReadLocal) readLocalClip() else null
-            if (forceLocalRead && local != null) Log.d(TAG, "bg read: ${previewOf(local)}")
+            if (forceLocalRead && local != null) Log.d(TAG, "bg read: ${describeForLog(local)}")
             if (local != null && local != lastSyncedItem) {
                 if (local.isImage && !shareImagesEnabled) {
                     // Do not let remote content overwrite an unsent local image.
@@ -360,9 +360,13 @@ class ClipboardSyncService : Service() {
         clipboardManager.setPrimaryClip(clip)
     }
 
-    private fun previewOf(item: ClipItem): String =
+    /**
+     * Describes a clip for the log without its content: copied text can be a password or
+     * a one-time code, and logcat is readable by adb, bug reports and READ_LOGS apps.
+     */
+    private fun describeForLog(item: ClipItem): String =
         if (item.isImage) "<image ${item.png?.size ?: 0} bytes>"
-        else (item.text ?: "").replace("\n", "\\n").take(80)
+        else "<text ${item.text?.length ?: 0} chars>"
 
     /** Empty when background phone -> PC is fully set up; otherwise names what is missing. */
     private fun backgroundStatusSuffix(): String = when {
@@ -518,8 +522,7 @@ class ClipboardSyncService : Service() {
         } else {
             val text = item.text ?: ""
             setClipQuietly(ClipData.newPlainText("shared", text))
-            val preview = text.replace("\n", "\\n").take(80)
-            Log.d(TAG, "remote applied: $preview")
+            Log.d(TAG, "remote applied: ${describeForLog(item)}")
         }
     }
 
