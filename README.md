@@ -1,31 +1,42 @@
 # Clipboard Share
 
-Compartir el clipboard (texto e imágenes) entre un PC con Windows y un móvil
-Android en la misma red WiFi, mediante descubrimiento automático (mDNS/Bonjour)
-y transferencia P2P sobre HTTP local. Sin cables ni servicios en la nube.
+Compartir el clipboard (texto e imágenes) entre un PC con Windows o Linux y un
+móvil Android en la misma red WiFi, mediante descubrimiento automático
+(mDNS/Bonjour) y transferencia P2P sobre HTTP local. Sin cables ni servicios en
+la nube. El móvil además puede manejar el mouse y el teclado del PC.
 
 ## Objetivo
 
-- PC (Windows) y móvil (Android) en la misma LAN.
-- Copiar en uno → pegar en el otro.
+- PC (Windows o Linux) y móvil (Android) en la misma LAN.
+- Copiar en uno → pegar en el otro, también con la app del móvil cerrada.
 - Soporta texto e imágenes.
+- El móvil controla mouse y teclado del PC, previa aprobación en el PC.
 
 ## Arquitectura
 
 - **Servidor en el PC (Go)**: expone una API HTTP local y se anuncia vía mDNS
   (`_clipboard-share._tcp`) para que el móvil lo descubra automáticamente.
-- **Cliente Android**: descubre el servidor por mDNS y sincroniza el clipboard.
+- **Cliente Android**: descubre el servidor por mDNS, sincroniza el clipboard y
+  hace de trackpad/teclado remoto.
+- **Panel de escritorio (Linux, Qt Quick)**: ventana + bandeja para aprobar
+  teléfonos y revocar dispositivos; habla con el servidor por un socket de
+  control local.
 
 ## Estructura
 
 ```
 Clipboard_Share/
-├── cmd/server/        # entrypoint del servidor Go
+├── cmd/server/        # entrypoint del servidor Go (y el CLI `pair`)
 ├── internal/
-│   ├── api/           # handlers HTTP
-│   ├── clipboard/     # acceso al clipboard del SO (Windows)
-│   └── discovery/     # mDNS announce/browse
-├── android/           # proyecto Android (Kotlin)
+│   ├── api/           # handlers HTTP y WebSocket de control remoto
+│   ├── clipboard/     # clipboard del SO (Windows, X11, Wayland)
+│   ├── discovery/     # mDNS announce/browse
+│   ├── input/         # inyección de mouse/teclado (SendInput, uinput)
+│   └── pair/          # emparejamiento por identidad + socket de control
+├── android/           # app Android (Kotlin)
+├── panel/             # panel de escritorio Linux (C++ / Qt Quick) y sus tests
+├── pkgbuild/          # paquete Arch, servicio de usuario, launcher, ícono
+├── odd/tasks/         # especificaciones de cada funcionalidad
 └── README.md
 ```
 
@@ -35,12 +46,14 @@ Clipboard_Share/
 
 - Go 1.22 o superior (se usa 1.24 por dependencias).
 - Windows 10/11 (acceso al clipboard vía `golang.design/x/clipboard`).
-- **Linux (beta)**: X11 usa la misma librería; en Wayland el server usa
+- **Linux**: X11 usa la misma librería; en Wayland el server usa
   `wl-copy`/`wl-paste` (`wl-clipboard`) automáticamente si hay
   `WAYLAND_DISPLAY`. Para el control remoto hace falta `/dev/uinput`
   (ver “Permisos uinput” más abajo); sin él, el server sigue corriendo y
-    el clipboard funciona, pero la inyección de input queda en modo
-    registro.
+  el clipboard funciona, pero la inyección de input queda en modo
+  registro.
+- **Panel de escritorio (opcional)**: Qt 6 (`qt6-base`, `qt6-declarative`,
+  `qt6-wayland`), `qmake6` y `make` para compilarlo.
 
 Dependencias Go (se descargan con `go mod tidy`):
 
@@ -72,9 +85,15 @@ Share”).
 ```bash
 cd pkgbuild && makepkg -f          # compila servidor + panel desde este árbol
 sudo pacman -U clipboard-share-*-x86_64.pkg.tar.zst
-sudo udevadm control --reload && sudo udevadm trigger /dev/uinput   # una vez
 systemctl --user enable --now clipboard-share                        # servidor
 ```
+
+`makepkg` necesita `go` como paquete de pacman; si Go lo tenés solo con `mise`,
+usá `mise exec go@1.24 -- makepkg -f --nodeps` (salta únicamente el chequeo de
+esa dependencia de compilación). Para cambiar el puerto:
+`systemctl --user edit clipboard-share` y definí
+`Environment=CLIPBOARD_SHARE_PORT=...`. El panel arranca con la sesión gracias
+al autostart que instala el paquete.
 
 El panel (`clipboard-share-panel`) arranca solo con la sesión, oculto en la
 bandeja; cuando un teléfono pide emparejarse, **la bandeja avisa** (clic en el
@@ -89,11 +108,10 @@ deliberado en el botón:
 - Teclas: `?` ayuda, `Esc` oculta a la bandeja, `Q` sale. Clic en el ícono de
   la bandeja muestra/oculta la ventana. No hay atajo de teclado para aprobar.
 
-La regla udev usa `uaccess`: el usuario con sesión activa puede usar
-`/dev/uinput` sin pertenecer al grupo `input`. Detalles del paquete en
-`pkgbuild/README.md`. Sin paquete, se puede probar el panel a mano:
-`panel/bin/build && panel/build/clipboard-share-panel`; sus tests corren con
-`panel/bin/test` (Qt Test, offscreen).
+El paquete también instala una regla udev para `/dev/uinput` (ver “Permisos
+uinput”). Detalles del paquete en `pkgbuild/README.md`. Sin paquete, se puede
+probar el panel a mano: `panel/bin/build && panel/build/clipboard-share-panel`;
+sus tests corren con `panel/bin/test` (Qt Test, offscreen).
 
 ## Uso (servidor PC)
 
@@ -105,17 +123,19 @@ go run ./cmd/server   # o el binario, ver “Generar binario”
 ### Permisos uinput (Linux/Wayland)
 
 Wayland prohíbe la inyección global de input por protocolo; el server usa
-`/dev/uinput`, que por defecto es solo de root. Para permitir que tu
-usuario cree dispositivos virtuales (necesita `sudo` una sola vez):
+`/dev/uinput`. En Arch el nodo ya es `root:input` con modo `0660`, así que
+alcanza con que tu usuario esté en el grupo `input`:
 
 ```bash
-sudo tee /etc/udev/rules.d/99-clipboard-share-uinput.rules >/dev/null <<'EOF'
-KERNEL=="uinput", GROUP="input", MODE="0660"
-EOF
-sudo usermod -aG input "$USER"
-# recargar (o reiniciar):
-sudo udevadm control --reload && sudo udevadm trigger
+sudo usermod -aG input "$USER"   # y volver a iniciar sesión
 ```
+
+El log de arranque dice qué modo está activo (`input: uinput injector active`
+o el stub de registro). El paquete instala además una regla con `uaccess`
+(`pkgbuild/99-clipboard-share-uinput.rules`) pensada para dar acceso al usuario
+con sesión activa sin el grupo; **no está verificada**: en la máquina de
+desarrollo el ACL de `/dev/uinput` no mostró ninguna entrada para el usuario y
+el acceso venía del grupo `input`.
 
 El servidor escucha en `:8765` (configurable con `CLIPBOARD_SHARE_PORT`) y se
 anuncia en la red local como `_clipboard-share._tcp`.
@@ -156,7 +176,8 @@ Endpoints:
 El server puede recibir input del teléfono (especificación en
 `odd/tasks/input-control.md` y `odd/tasks/transparent-pairing.md`):
 
-1. En el teléfono, tocar **Conectar** en la pantalla de control remoto.
+1. En el teléfono, elegir el host de la lista de inicio: abre el trackpad y
+   pide el emparejamiento si es la primera vez.
 2. En el PC aparece una notificación y el **panel** muestra la solicitud:
    tocar **Aprobar**. El CLI sigue disponible para scripts:
 
@@ -179,14 +200,17 @@ abrir el panel:
 bind = SUPER SHIFT, P, exec, clipboard-share pair --last
 ```
 
-Si se pierde un teléfono: **Revocar** en el panel (o `clipboard-share pair revoke --device <id>`); para
-resetear todo el pairing, borrar `state.json`.
+Si se pierde un teléfono: **Revocar** en el panel (o
+`clipboard-share pair revoke --device <id>`); para resetear todo el pairing,
+borrar `state.json`.
 
 En Windows la inyección usa `SendInput` (sin cgo, build tag `windows`); en
 Linux usa `/dev/uinput` (requiere el permiso de la sección “Permisos
 uinput”; sin acceso, el server registra eventos en un stub, útil para
-desarrollo; el log de arranque indica qué modo está activo). El clipboard
-sigue sin autenticación por ahora; el control de input **no**.
+desarrollo). **El clipboard sigue sin autenticación**: cualquiera en la LAN
+puede leerlo y escribirlo; el control de input **no** (requiere token). Una
+solicitud de emparejamiento puede mandarla cualquiera en la LAN, por eso el
+panel nunca la aprueba solo ni abre su ventana por ella.
 
 ## Generar binario
 
@@ -238,10 +262,18 @@ línea (solo la de su propio paquete), abre una fracción de segundo una ventana
 transparente que gana foco, lee el clipboard, lo envía a la PC y la cierra.
 Mientras tanto retiene el clipboard de la PC para que tu copia gane. Sin los
 permisos, el estado de la pantalla remota lo indica ("Falta permiso READ_LOGS:
-ver README") y el servicio sigue sincronizando solo PC → celu.
+ver README") y el servicio sigue sincronizando solo PC → celu. Si los permisos
+están pero pasan 60 s sin que llegue ninguna línea del log, el estado agrega
+"Sin datos del log del sistema": suele ser el diálogo de acceso a registros sin
+aceptar (también puede aparecer si simplemente no hubo copias en ese tiempo).
+Los logs de la app nunca incluyen el contenido copiado: solo el tipo y el
+tamaño (`<text 9 chars>`).
 
 Es frágil por diseño: depende del texto de un log del sistema, que Android puede
-cambiar entre versiones. Probado en Android 16 (Samsung S24).
+cambiar entre versiones. Probado en Android 16 (Samsung S24), con el servicio
+del paquete corriendo en el PC. Una escritura propia en segundo plano genera
+**dos** líneas de log (~340 ms entre sí), y el servicio las trata como eco
+propio para no abrir la ventana de lectura tras cada copia que llega de la PC.
 
 ## Estado del proyecto
 
@@ -252,12 +284,25 @@ cambiar entre versiones. Probado en Android 16 (Samsung S24).
   aprobación en el PC (sin PIN), estado persistido, stream WebSocket con
   validación estricta y límites de tasa; `SendInput` en Windows y `uinput` en
   Linux.
+- Panel de escritorio para Linux (Qt Quick) con bandeja, paquete Arch, servicio
+  de usuario con autostart, ícono y entrada de launcher. Verificado instalando
+  el paquete: el servicio arranca, se reinicia solo si cae y el panel lo ve.
 - Cliente Android: home con lista de hosts (vivos + recordados), tokens por
   host con reconexión transparente, sincronización bidireccional de texto e
   imágenes (PNG) y control remoto (trackpad + teclado + botones de click) en su
   propia pantalla. El sync corre en segundo plano vía ForegroundService atado
   al último host elegido: PC → celu sin configuración, y celu → PC con la app
   cerrada tras dar dos permisos por `adb` (ver "Sync de clipboard en segundo
-  plano"; tras reiniciar el teléfono alcanza con abrir la app una vez).
-- Tests: handlers HTTP del server, broker de pairing, parser de eventos y
-  stream WebSocket (`internal/api`, `internal/pair`, `internal/input`).
+  plano").
+- Tests:
+  - Go: `go test ./...` (`internal/api`, `internal/clipboard`, `internal/input`,
+    `internal/pair`).
+  - Panel: `panel/bin/test` (Qt Test offscreen: backend contra un servidor
+    falso, UI con clics y teclas reales, instancia única).
+  - Android: `cd android && ./gradlew testDebugUnitTest` (JUnit sobre la lógica
+    de disparo del sync en segundo plano).
+- Conocido y sin resolver: el clipboard HTTP no está autenticado; el sync celu →
+  PC depende del texto de un log del sistema de Android y de un diálogo de
+  consentimiento que solo el usuario puede aceptar; la regla udev `uaccess` no
+  está verificada. Los hallazgos no bloqueantes de los reviews están en
+  `odd/tasks/review-followups.md`.

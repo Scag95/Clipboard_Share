@@ -42,7 +42,7 @@ Set `CLIPBOARD_SHARE_PORT` (default `8765`) with
 ## Remote input (/dev/uinput)
 
 The udev rule grants the logged-in session user access to `/dev/uinput`
-(`uaccess`, no `input` group). Apply it once after installing:
+(`uaccess`; see the note below). Apply it once after installing:
 
 ```sh
 sudo udevadm control --reload && sudo udevadm trigger /dev/uinput
@@ -50,3 +50,10 @@ sudo udevadm control --reload && sudo udevadm trigger /dev/uinput
 
 Without access to `/dev/uinput` the server still runs, but remote input is
 disabled.
+
+Note on `uaccess`: the rule is meant to give the active local session user access
+to `/dev/uinput` without the `input` group. That was not verified on the
+development machine: after installing the package and reloading udev the ACL on
+`/dev/uinput` had no entry for the user, and access worked because the user is in
+the `input` group (the node is `root:input 0660` by default). If remote input
+runs in stub mode, add yourself to the `input` group and log in again.

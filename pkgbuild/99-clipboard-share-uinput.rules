@@ -1,2 +1,3 @@
-# Let the active local session user open /dev/uinput (remote input) without the input group.
+# Intended to let the active local session user open /dev/uinput (remote input) without
+# the input group. Unverified: on the dev machine access came from the input group instead.
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

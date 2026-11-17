@@ -52,7 +52,7 @@ launcher.
   servidor Go y el panel y instala: `/usr/bin/clipboard-share`,
   `/usr/bin/clipboard-share-panel`, el servicio de usuario systemd
   `clipboard-share.service` (arranca con la sesión gráfica, reinicia si
-  cae), la regla udev para `/dev/uinput` (`uaccess`, sin grupo `input`),
+  cae), la regla udev para `/dev/uinput` (`uaccess`; **no verificada**: al instalar el paquete el ACL no se aplicó y el acceso vino del grupo `input`),
   `clipboard-share.desktop` (launcher), un autostart del panel con
   `--background`, y el ícono SVG. Dependencias: `wl-clipboard`, Qt6.
 
