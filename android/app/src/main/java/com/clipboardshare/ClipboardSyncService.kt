@@ -126,8 +126,9 @@ class ClipboardSyncService : Service() {
     /** Last content this device has already propagated in both directions for this host. */
     @Volatile private var lastSyncedItem: ClipItem? = null
 
-    private var consecutiveNetworkFailures = 0
-    private var notificationConnected = true
+    // Reset on the main thread in onStartCommand, read and updated by the sync workers.
+    @Volatile private var consecutiveNetworkFailures = 0
+    @Volatile private var notificationConnected = true
 
     /** Serializes every runSync: the poll, the clip listener and the background read. */
     private val syncMutex = Mutex()

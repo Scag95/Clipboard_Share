@@ -104,10 +104,10 @@ Android, `review-42138c68e1bdbbdb`, y el panel de Linux,
 
 ## Tasks
 
-- [ ] **T1** (S2) — Panel P1-P11. Route: worker A (`panel/**`), test-first. Commit: pendiente
-- [ ] **T2** (S3) — Android A1-A10. Route: worker B (`android/**`). Commit: pendiente
-- [ ] **T3** (S4) — Alta en el launcher. Route: inline. Commit: n/a (instalación local)
-- [ ] **T4** (S3) — Probar en el celu (R1 sin contenido + camino feliz). Route: inline. Commit: n/a
+- [x] **T1** (S2) — Panel P1-P11. Route: worker A (`panel/**`), test-first. Commit: `f3e85cd` (bin/test: 19 + 11 casos sin QWARN, verificado por el parent)
+- [x] **T2** (S3) — Android A1-A10. Route: worker B (`android/**`). Commits: `ad48303` y `ec8a9e4` (corrección de A5/A6 que halló el verificador independiente; 25 tests JUnit)
+- [x] **T3** (S4) — Alta en el launcher. Route: inline. Instalado en `~/.local` (binarios, .desktop validado, ícono); pendiente que el usuario confirme que sale al buscar
+- [ ] **T4** (S3) — Probar en el celu. R1 sin contenido: verificado (`remote applied: <text 132 chars>`). Camino celu→PC con el watcher: **sin verificar** (Android destruye el diálogo de acceso a logs sin interacción; hace falta el celu en mano)
 
 ## Riesgos
 
@@ -121,3 +121,16 @@ Android, `review-42138c68e1bdbbdb`, y el panel de Linux,
 - **L1** — "arregla todos los errores, te deje el celular conectado y
   desbloqueado. si ya compilaste la app, añadelo al inicio para poder buscarlo
   en la barra de aplicaicones."
+- **L2** — Verificación independiente de T2 (riesgo item 4): A2-A4 y A7-A10 PASS;
+  **A5 FAIL** (una escritura propia con la app visible no genera eco pero se
+  contaba como esperado: se tragaba una copia real) y **A6 FAIL** (un watcher
+  viejo podía llamar `onClipboardChangeDetected` tras `stop`). Corregidos en
+  `ec8a9e4` (A5 con test RED→GREEN). Advisories: `consecutiveNetworkFailures`
+  y `notificationConnected` ahora `@Volatile`; el cierre de la ventana
+  transparente se posta con `runOnUiThread` y el upload puede arrancar antes de
+  que desaparezca, pero la ventana ya mide 0.38 s con la PC caída y tiene tope
+  de 2.5 s (medido en el celu, ver `bg-phone-to-pc.md` L4).
+- **L3** — Sin verificar en dispositivo: A4 (concesión de `READ_LOGS` en vivo), A5
+  (ecos reales por escritura), A8 (`-v epoch` filtra la línea repetida) y A9
+  (aviso sin consentimiento de logs). El formato real de `-v epoch` sí se
+  comprobó contra el parser.
