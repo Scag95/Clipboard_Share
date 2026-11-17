@@ -132,10 +132,14 @@ class ClipboardTriggerPolicyTest {
 
     // --- Own-change suppression and the deferred user copy (A5) ---
 
+    // Measured on a Samsung S24 (Android 16): one clipboard write made in the background
+    // logs TWO denial lines for our package about 340 ms apart. Both are the write's echo.
     @Test
     fun echoOfOwnWriteIsSuppressedAndNothingIsDeferred() {
         val quietMs = policy.onOwnClipWrite()
         assertEquals(OWN_CHANGE_QUIET_MS, quietMs)
+        assertEquals(TriggerDecision.OwnChangeEcho, policy.onTrigger())
+        now += 340
         assertEquals(TriggerDecision.OwnChangeEcho, policy.onTrigger())
         assertFalse(policy.isRemoteHeldBack())
         now += OWN_CHANGE_QUIET_MS
@@ -157,6 +161,7 @@ class ClipboardTriggerPolicyTest {
     fun userCopyDuringTheQuietWindowFiresOnceWhenTheWindowEnds() {
         policy.onOwnClipWrite()
         assertEquals(TriggerDecision.OwnChangeEcho, policy.onTrigger())
+        assertEquals(TriggerDecision.OwnChangeEcho, policy.onTrigger())
         now += 100
         assertEquals(TriggerDecision.DeferredUntilQuietEnds, policy.onTrigger())
         assertFalse(policy.takeDeferredTrigger())
@@ -169,8 +174,9 @@ class ClipboardTriggerPolicyTest {
     @Test
     fun deferredTriggerWaitsForAQuietWindowExtendedByAnotherOwnWrite() {
         policy.onOwnClipWrite()
+        policy.onTrigger() // the write's two echoes
         policy.onTrigger()
-        policy.onTrigger()
+        policy.onTrigger() // a real copy, deferred
         now += OWN_CHANGE_QUIET_MS - 100
         policy.onOwnClipWrite()
         now += 100

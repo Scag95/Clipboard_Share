@@ -52,6 +52,14 @@ class ClipboardTriggerPolicy(private val clock: () -> Long) {
         const val TRIGGER_DEBOUNCE_MS = 400L
 
         /** After writing the clipboard ourselves, the next denial line is our own echo. */
+        /**
+         * Denial lines the system logs for ONE clipboard write made in the background.
+         * Measured on a Samsung S24 (Android 16): two lines for our package ~340 ms apart,
+         * both well inside [OWN_CHANGE_QUIET_MS]. Counting one made the second look like a
+         * real copy and opened the read window after every copy from the PC.
+         */
+        const val OWN_ECHOES_PER_WRITE = 2
+
         const val OWN_CHANGE_QUIET_MS = 1_500L
 
         /** Hard cap on how long ClipboardReadActivity may stay on screen. */
@@ -127,7 +135,7 @@ class ClipboardTriggerPolicy(private val clock: () -> Long) {
         suppressTriggersUntil = now + OWN_CHANGE_QUIET_MS
         // With our app focused the system logs no denial for the write, so no echo is
         // coming; counting one would swallow a real copy made right after we leave.
-        if (expectEcho) expectedOwnEchoes++
+        if (expectEcho) expectedOwnEchoes += OWN_ECHOES_PER_WRITE
         return OWN_CHANGE_QUIET_MS
     }
 

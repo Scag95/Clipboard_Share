@@ -107,7 +107,7 @@ Android, `review-42138c68e1bdbbdb`, y el panel de Linux,
 - [x] **T1** (S2) — Panel P1-P11. Route: worker A (`panel/**`), test-first. Commit: `f3e85cd` (bin/test: 19 + 11 casos sin QWARN, verificado por el parent)
 - [x] **T2** (S3) — Android A1-A10. Route: worker B (`android/**`). Commits: `ad48303` y `ec8a9e4` (corrección de A5/A6 que halló el verificador independiente; 25 tests JUnit)
 - [x] **T3** (S4) — Alta en el launcher. Route: inline. Instalado en `~/.local` (binarios, .desktop validado, ícono); pendiente que el usuario confirme que sale al buscar
-- [ ] **T4** (S3) — Probar en el celu. R1 sin contenido: verificado (`remote applied: <text 132 chars>`). Camino celu→PC con el watcher: **sin verificar** (Android destruye el diálogo de acceso a logs sin interacción; hace falta el celu en mano)
+- [x] **T4** (S3) — Probar en el celu. R1 sin contenido: verificado (`remote applied: <text 132 chars>`). Camino celu→PC con el watcher y el servicio de usuario real: **verificado** (copia en otra app con la app en background llegó al clipboard de la PC; 0 apariciones del texto en el log; el 2º denial de la copia quedó `Debounced`)
 
 ## Riesgos
 
@@ -144,3 +144,16 @@ Android, `review-42138c68e1bdbbdb`, y el panel de Linux,
   política. Riesgo aceptado: `startActivity` corre bajo `logWatcherLock`, así que
   una llamada de Android anormalmente lenta podría retrasar `onDestroy`.
   Decisión del usuario: push **sin review nativo** del tramo Android.
+- **L5** — Hallazgo en el dispositivo (Samsung S24, Android 16): **cada escritura
+  propia en background genera DOS líneas de denial** para nuestro paquete, ~340 ms
+  entre sí (epoch `.016` y `.356`). El supuesto de A5 ("un eco por escritura") era
+  falso: el segundo se tomaba por copia real, quedaba diferido y abría la ventana
+  de lectura tras cada copia del PC. Corregido con `OWN_ECHOES_PER_WRITE = 2`
+  (tests ajustados primero; medido: dos `OwnChangeEcho` y ninguna lectura de más).
+  Moraleja: la hipótesis de A5 estaba marcada como "solo el celu real lo prueba";
+  los tests unitarios con el supuesto mal puesto pasaban en verde.
+- **L6** — Servicio instalado sin sudo (unit en `~/.config/systemd/user`, autostart del
+  panel en `~/.config/autostart`): active/enabled, reinicia tras SIGKILL, el
+  clipboard funciona desde el entorno del servicio y el celu reconectó solo.
+  `/dev/uinput` ya es accesible por el grupo `input`: la regla udev del paquete
+  solo hace falta para usuarios fuera de ese grupo.
