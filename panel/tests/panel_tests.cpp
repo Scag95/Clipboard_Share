@@ -12,55 +12,11 @@
 #include <QtTest>
 
 #include "backend.h"
+#include "fakeserver.h"
+
+using namespace fake;
 
 namespace {
-
-// Answers every command with the next scripted response and records commands.
-class FakeServer : public QObject {
-public:
-    explicit FakeServer(const QString &path) {
-        QLocalServer::removeServer(path);
-        QVERIFY2(m_server.listen(path), "fake server could not listen");
-        connect(&m_server, &QLocalServer::newConnection, this, [this] {
-            auto *socket = m_server.nextPendingConnection();
-            connect(socket, &QLocalSocket::readyRead, this, [this, socket] {
-                while (socket->canReadLine()) {
-                    const auto command = QJsonDocument::fromJson(socket->readLine()).object();
-                    commands.append(command);
-                    socket->write(QJsonDocument(nextResponse(command)).toJson(QJsonDocument::Compact) + "\n");
-                    socket->flush();
-                }
-            });
-            connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
-        });
-    }
-
-    QJsonObject nextResponse(const QJsonObject &command) {
-        const auto cmd = command.value("cmd").toString();
-        if (cmd == "list")
-            return {{"ok", true}, {"requests", requests}, {"devices", devices}};
-        if (!actionError.isEmpty())
-            return {{"ok", false}, {"error", actionError}, {"requests", QJsonValue::Null}, {"devices", QJsonValue::Null}};
-        return {{"ok", true}, {"message", actionMessage}, {"requests", QJsonValue::Null}, {"devices", QJsonValue::Null}};
-    }
-
-    QJsonArray requests, devices;
-    QString actionMessage = "Approved pair request.";
-    QString actionError;
-    QList<QJsonObject> commands;
-
-private:
-    QLocalServer m_server;
-};
-
-QJsonObject request(const QString &requestId, const QString &name, const QString &ip) {
-    return {{"requestId", requestId}, {"id", "dev-" + requestId}, {"name", name}, {"ip", ip},
-            {"requestedAt", "2026-05-17T18:00:00Z"}};
-}
-
-QJsonObject device(const QString &id, const QString &name, const QString &ip) {
-    return {{"id", id}, {"name", name}, {"ip", ip}, {"firstApproved", "2026-05-17T18:00:00Z"}};
-}
 
 // Waits until the backend has finished a round trip: its changed() signal fires.
 bool waitChanged(QSignalSpy &spy, int count = 1) {

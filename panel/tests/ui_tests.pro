@@ -1,0 +1,9 @@
+QT += core gui qml quick quickcontrols2 network testlib
+CONFIG += c++17 testcase console
+CONFIG -= app_bundle
+TARGET = ui_tests
+TEMPLATE = app
+INCLUDEPATH += ../src
+SOURCES += ui_tests.cpp ../src/backend.cpp ../src/theme.cpp
+HEADERS += ../src/backend.h ../src/theme.h fakeserver.h
+RESOURCES += ../src/resources.qrc
