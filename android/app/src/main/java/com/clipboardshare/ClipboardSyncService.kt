@@ -198,7 +198,7 @@ class ClipboardSyncService : Service() {
     override fun onDestroy() {
         clipListener?.let(clipboardManager::removePrimaryClipChangedListener)
         clipListener = null
-        syncStarted = false
+        synchronized(logWatcherLock) { syncStarted = false }
         stopLogWatcher()
         mainHandler.removeCallbacksAndMessages(null)
         instance = null
@@ -496,8 +496,9 @@ class ClipboardSyncService : Service() {
     }
 
     private fun onClipboardChangeDetected() {
-        // A watcher thread can still be mid-line when the service is destroyed.
-        if (!syncStarted || !isCurrentLogWatcher()) return
+        // Called from the watcher thread and, for a deferred copy, from the main thread.
+        // A watcher can still be mid-line when the service is destroyed.
+        if (!syncStarted) return
         if (appVisible()) return
         if (!Settings.canDrawOverlays(this)) {
             Log.w(TAG, "bg trigger ignored: overlay permission missing")
@@ -509,16 +510,24 @@ class ClipboardSyncService : Service() {
             return
         }
         Log.d(TAG, "bg trigger: clipboard changed")
-        scheduleReadGrace(decision.readId)
-        try {
-            startActivity(
-                Intent(this, ClipboardReadActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "bg read activity failed: ${e.message}")
-            cancelReadGrace()
-            triggerPolicy.readLaunchFailed()
+        // The "still running" check and the launch happen under the same lock onDestroy
+        // takes to clear syncStarted, so a destroyed service never launches the window.
+        synchronized(logWatcherLock) {
+            if (!syncStarted) {
+                triggerPolicy.readLaunchFailed()
+                return
+            }
+            scheduleReadGrace(decision.readId)
+            try {
+                startActivity(
+                    Intent(this, ClipboardReadActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "bg read activity failed: ${e.message}")
+                cancelReadGrace()
+                triggerPolicy.readLaunchFailed()
+            }
         }
     }
 
