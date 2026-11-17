@@ -62,9 +62,9 @@ launcher.
 
 - [x] **T1** (S1-S9) — este documento y el corte de slice. Route: inline. Commit: ver git log (docs(odd): linux-app feature doc)
 - [x] **T2** (S3, S4, S7) — backend C++ + tests Qt Test (9 casos; RED observado antes de implementar). Route: inline, test-first. Commit: ver git log (feat(panel): control socket backend)
-- [ ] **T3** (S2, S4, S5, S6) — UI QML, bandeja, tema Omarchy, `qsTr`. Route: inline. Commit: pendiente
-- [ ] **T4** (S8) — PKGBUILD, servicio de usuario, udev, `.desktop`, ícono. Route: inline. Commit: pendiente
-- [ ] **T5** (S9) — README, E2E en esta máquina (servicio + panel + emparejar el celu), cierre. Route: inline. Commit: pendiente
+- [x] **T3** (S2, S4, S5, S6) — UI QML, bandeja, tema Omarchy, `qsTr`. Route: inline. Commit: `5b5535e` (UI 8/8 + backend 9/9 offscreen; en vivo: arranque oculto, aparece ante solicitud real, StatusNotifierItem registrado)
+- [x] **T4** (S8) — PKGBUILD, servicio de usuario, udev, `.desktop`, ícono. Route: worker (archivos) + build inline. Commit: `1b8f29c` (makepkg OK; el paquete contiene los 7 paths; **instalar y arrancar el servicio requiere sudo del usuario: sin probar**)
+- [ ] **T5** (S9) — README, E2E en esta máquina (servicio + panel + emparejar el celu), cierre. Route: inline. Commit: ver git log (README hecho; E2E con el paquete instalado pendiente del sudo del usuario)
 
 ## Riesgos
 
@@ -96,3 +96,13 @@ aparte si el usuario prefiere partir la rama.
   acción borraba su error en <1 s; el error de acción ahora persiste hasta la
   próxima acción. Sin catálogos i18n por ahora: textos con `qsTr`/`tr`, en
   inglés, sin el `Translator` de la plantilla (S2 sigue cumplida).
+- **L4** — Hallazgos de la verificación en vivo de T3: (a) `tray.available` no es
+  estático en QML (warning `undefined`): se usa la instancia; (b) en una
+  ventana tileada las tarjetas se estiraban a todo el ancho: contenido
+  centrado con tope de 560 px; (c) el diálogo de revocar tenía un binding
+  loop de `implicitWidth`: ancho explícito. Probar teclas con `wtype` sobre la
+  sesión viva del usuario no es fiable ni inocuo: la interacción se verifica
+  con tests de UI offscreen (`panel/tests/ui_tests.cpp`).
+- **L5** — El worker de T4 dejó `makepkg` bloqueado por `go` (solo provisto por
+  mise); se construyó con `mise exec go@1.24 -- makepkg -f --nodeps --nocheck`
+  (solo salta el chequeo de la dependencia de build).

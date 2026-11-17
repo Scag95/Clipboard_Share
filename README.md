@@ -62,6 +62,36 @@ Dependencias Go (se descargan con `go mod tidy`):
   - `javax.jmdns` o NSD nativo (`NsdManager`) — descubrimiento mDNS
   - Coroutines — operaciones asíncronas
 
+## App de escritorio para Linux (panel + servicio)
+
+En Arch/Omarchy el servidor se instala como paquete: trae el servidor, un
+**panel gráfico** con ícono en la bandeja, el servicio de usuario con
+autostart, el ícono y la entrada del launcher (`Super + Space` → “Clipboard
+Share”).
+
+```bash
+cd pkgbuild && makepkg -f          # compila servidor + panel desde este árbol
+sudo pacman -U clipboard-share-*-x86_64.pkg.tar.zst
+sudo udevadm control --reload && sudo udevadm trigger /dev/uinput   # una vez
+systemctl --user enable --now clipboard-share                        # servidor
+```
+
+El panel (`clipboard-share-panel`) arranca solo con la sesión, oculto en la
+bandeja; cuando un teléfono pide emparejarse, **la ventana aparece sola**:
+
+- **Aprobar / Rechazar** cada solicitud (caducan a los 90 s).
+- **Revocar** un dispositivo emparejado (pide confirmación).
+- Estado del servidor; si no corre, lo dice y sugiere
+  `systemctl --user start clipboard-share`.
+- Teclas: `A` aprueba la solicitud más nueva, `?` ayuda, `Esc` oculta a la
+  bandeja, `Q` sale. Clic en el ícono de la bandeja muestra/oculta la ventana.
+
+La regla udev usa `uaccess`: el usuario con sesión activa puede usar
+`/dev/uinput` sin pertenecer al grupo `input`. Detalles del paquete en
+`pkgbuild/README.md`. Sin paquete, se puede probar el panel a mano:
+`panel/bin/build && panel/build/clipboard-share-panel`; sus tests corren con
+`panel/bin/test` (Qt Test, offscreen).
+
 ## Uso (servidor PC)
 
 ```bash
@@ -124,7 +154,8 @@ El server puede recibir input del teléfono (especificación en
 `odd/tasks/input-control.md` y `odd/tasks/transparent-pairing.md`):
 
 1. En el teléfono, tocar **Conectar** en la pantalla de control remoto.
-2. En el PC aparece una notificación; aprobar el dispositivo:
+2. En el PC aparece una notificación y el **panel** muestra la solicitud:
+   tocar **Aprobar** (o `A`). El CLI sigue disponible para scripts:
 
    ```bash
    clipboard-share pair --last   # aprueba el request más nuevo
@@ -138,14 +169,14 @@ El server puede recibir input del teléfono (especificación en
    `~/.config/clipboard-share/state.json` (`0600`) y sobrevive reinicios del
    server y de la PC.
 
-Atajo recomendado para Hyprland (`~/.config/hypr/hyprland.conf`), que además
-deja de depender de la notificación:
+Atajo opcional para Hyprland (`~/.config/hypr/hyprland.conf`) que aprueba sin
+abrir el panel:
 
 ```ini
 bind = SUPER SHIFT, P, exec, clipboard-share pair --last
 ```
 
-Si se pierde un teléfono: `clipboard-share pair revoke --device <id>`; para
+Si se pierde un teléfono: **Revocar** en el panel (o `clipboard-share pair revoke --device <id>`); para
 resetear todo el pairing, borrar `state.json`.
 
 En Windows la inyección usa `SendInput` (sin cgo, build tag `windows`); en
