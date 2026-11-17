@@ -1,0 +1,91 @@
+# Feature: linux-app — panel gráfico + empaquetado para Linux
+
+App de escritorio para Omarchy/Linux que reemplaza el CLI
+`clipboard-share pair` por un panel (ventana + bandeja) y deja el servidor
+instalable como servicio de usuario con autostart, ícono y entrada en el
+launcher.
+
+## Specs
+
+- **S1** — Verbatim: "Arregla R1 y continua con la app." La "app para Linux"
+  es la decisión previa del usuario: **panel gráfico + empaquetado**; el
+  panel reemplaza `clipboard-share pair`, el empaquetado agrega servicio de
+  usuario con autostart, ícono y entrada de launcher.
+
+- **S2 — Panel (Qt Quick, C++)**: sigue la skill `omarchy-app`: `QGuiApplication`,
+  estilo Material oscuro, acento y redondeo del tema de Omarchy en vivo,
+  textos con `qsTr`, binario único compilado con `qmake6` + `make`.
+  Nombre de la app: `clipboard-share-panel` (binario); id de escritorio e
+  ícono: `clipboard-share`.
+
+- **S3 — Habla con el servidor por el socket de control existente** (sin
+  tocar el protocolo de Go): socket Unix en `CLIPBOARD_SHARE_CTL_SOCK` o
+  `~/.config/clipboard-share/ctl.sock`; un comando JSON por línea
+  (`{"cmd":"list"}`, `approve`, `approve-last`, `deny`+`request`,
+  `revoke`+`device`), una respuesta JSON por línea
+  `{ok,error,message,requests[],devices[]}`. No hay push: el panel refresca
+  con `list` periódico (~1 s). Las solicitudes pendientes caducan a los 90 s.
+
+- **S4 — Qué muestra y permite**: estado del servidor (socket alcanzable y
+  `GET /health` en `CLIPBOARD_SHARE_PORT`, por defecto 8765; nombre de host);
+  solicitudes pendientes con **Aprobar** / **Rechazar** (nombre, IP, hace
+  cuánto); dispositivos aprobados con **Revocar** (nombre, IP, primera
+  aprobación). Si el servidor no responde, la ventana lo dice con la causa
+  (no se oculta ni se degrada en silencio).
+
+- **S5 — Bandeja**: ícono en la bandeja; clic alterna la ventana; cerrar la
+  ventana la oculta (el panel sigue vivo); menú con Abrir y Salir. Una
+  solicitud nueva muestra la ventana o resalta el ícono; `--background`
+  arranca oculto (para autostart). Una sola instancia.
+
+- **S6 — Teclado primero**: `?` muestra los atajos, `Q` sale, `A` aprueba la
+  solicitud más reciente (equivale a `pair --last`).
+
+- **S7 — Se puede probar sin pantalla**: el backend (cliente del socket,
+  parseo de respuestas, estado) es una clase `QObject` con tests Qt Test que
+  corren `offscreen` contra un servidor falso en un socket temporal.
+
+- **S8 — Empaquetado Arch** (`pkgbuild/`): un `PKGBUILD` que compila el
+  servidor Go y el panel y instala: `/usr/bin/clipboard-share`,
+  `/usr/bin/clipboard-share-panel`, el servicio de usuario systemd
+  `clipboard-share.service` (arranca con la sesión gráfica, reinicia si
+  cae), la regla udev para `/dev/uinput` (`uaccess`, sin grupo `input`),
+  `clipboard-share.desktop` (launcher), un autostart del panel con
+  `--background`, y el ícono SVG. Dependencias: `wl-clipboard`, Qt6.
+
+- **S9 — Documentación**: el README reemplaza las instrucciones del CLI de
+  emparejamiento por el panel (el CLI `pair` se mantiene para scripts),
+  describe instalación, servicio, atajo de Hyprland y atajos del panel.
+
+## Tasks
+
+- [x] **T1** (S1-S9) — este documento y el corte de slice. Route: inline. Commit: ver git log (docs(odd): linux-app feature doc)
+- [ ] **T2** (S3, S4, S7) — backend C++ + tests Qt Test. Route: inline, test-first. Commit: pendiente
+- [ ] **T3** (S2, S4, S5, S6) — UI QML, bandeja, tema Omarchy, `qsTr`. Route: inline. Commit: pendiente
+- [ ] **T4** (S8) — PKGBUILD, servicio de usuario, udev, `.desktop`, ícono. Route: inline. Commit: pendiente
+- [ ] **T5** (S9) — README, E2E en esta máquina (servicio + panel + emparejar el celu), cierre. Route: inline. Commit: pendiente
+
+## Riesgos
+
+- Risk (T4): item 5 (entrega/entorno: instalador, servicio de usuario, regla
+  udev) → T4 va en su propio commit.
+- Risk (T2/T3): item none para el servidor Go: no se toca; el panel solo
+  consume el protocolo de control ya existente.
+
+## Corte de slice
+
+La rama `feat/input-control` ya está muy por encima de ~400 líneas (≈7.7k en
+34 commits; ya publicada hasta `a110d9d` salvo este trabajo). La app de Linux
+vive en `panel/` y `pkgbuild/`, directorios nuevos y disjuntos del resto:
+**cada tarea T2-T5 es su propio commit** y la app puede salir en un PR
+aparte si el usuario prefiere partir la rama.
+
+## Log
+
+- **L1** — "Arregla R1 y continua con la app." (respuesta a la propuesta: app
+  de Linux = panel gráfico + empaquetado, y arreglar el hallazgo R1-001 del
+  review: no loguear el contenido del portapapeles; hecho en `a110d9d`).
+- **L2** — Mapa del protocolo de control obtenido por exploración de solo
+  lectura (`internal/pair/pair.go:495-628`, `cmd/server/main.go:141-202`):
+  no hay push, `DeviceInfo` no tiene `lastSeen`; no existen PKGBUILD, unit,
+  `.desktop` ni ícono en el repo.
