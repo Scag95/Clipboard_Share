@@ -88,3 +88,8 @@ seleccionar host.
   (2) el spec bg-phone-to-pc debe estar versionado (lo esta desde este
   commit); (3) "activity started" no es "ventana con foco" (multiventana).
   Costo total ~$0.45. El arreglo real sigue en odd/tasks/bg-phone-to-pc.md.
+- L5 - R3-001 resuelto de raiz por odd/tasks/bg-phone-to-pc.md (celu a PC real
+  en background, verificado en el celu). El intento de corregirlo solo con
+  visibilidad/timestamp (idea de comparar ClipDescription.timestamp) quedo
+  refutado en el dispositivo: en Android 16 sin foco la descripcion del clip
+  es null. Ese parche no se commiteo.

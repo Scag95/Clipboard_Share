@@ -24,10 +24,13 @@ Documento para retomar el trabajo en otro equipo/entorno.
   (ForegroundService dataSync) con listener + polling 2 s, notificación de
   estado y reconexión automática tras caídas del server. Limitación conocida:
   tras reinicio del teléfono el servicio se reactiva al abrir la app una vez
-  (Android bloquea FGS desde BOOT_COMPLETED). Alcance real: en segundo plano
-  solo PC → celu; celu → PC requiere la app abierta (Android 10+ niega la
-  lectura del clipboard sin foco). Arreglo pendiente en
-  `odd/tasks/bg-phone-to-pc.md`.
+  (Android bloquea FGS desde BOOT_COMPLETED). celu → PC en segundo plano ✅
+  (`odd/tasks/bg-phone-to-pc.md`): lee el log del sistema (READ_LOGS) para
+  detectar la copia y abre una ventana transparente fugaz (superposición) que
+  gana foco para leerla; requiere dos permisos por adb y aceptar el diálogo de
+  acceso a logs de Android ("por única vez"). Frágil: depende del texto de un
+  log del sistema. Sin verificar en dispositivo: imagen con opt-in desactivado
+  en modo background.
 
 ### 3. Tests
 - Go: tests unitarios para los handlers HTTP (`internal/api`). ✅ Hecho.

@@ -15,7 +15,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -66,6 +72,22 @@ class ClipboardSyncService : Service() {
 
         private fun appVisible(): Boolean = visibleActivities.get() > 0
 
+        /** The live service, so the transient read activity can ask it to sync right now. */
+        @Volatile
+        var instance: ClipboardSyncService? = null
+            private set
+
+        private val readActivityInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        fun readActivityFinished() {
+            readActivityInFlight.set(false)
+        }
+
+        private const val READ_ACTIVITY_GRACE_MS = 5_000L
+        private const val OWN_CHANGE_QUIET_MS = 1_500L
+        private const val TRIGGER_DEBOUNCE_MS = 400L
+        private const val LOCAL_READ_PENDING_MS = 3_000L
+
         fun ensureStarted(context: Context) {
             val appContext = context.applicationContext
             ContextCompat.startForegroundService(
@@ -109,9 +131,17 @@ class ClipboardSyncService : Service() {
     private var consecutiveNetworkFailures = 0
     private var notificationConnected = true
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile private var logWatcher: Process? = null
+    @Volatile private var logWatcherThread: Thread? = null
+    @Volatile private var suppressTriggersUntil = 0L
+    private var lastTriggerAt = 0L
+    @Volatile private var localReadPendingUntil = 0L
+
     override fun onCreate() {
         super.onCreate()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        instance = this
         createNotificationChannel()
     }
 
@@ -142,6 +172,7 @@ class ClipboardSyncService : Service() {
             Log.d(TAG, "Clipboard sync started for $selectedHost")
             startClipListener()
             startSyncLoop()
+            startLogWatcher()
         }
         return START_STICKY
     }
@@ -152,6 +183,8 @@ class ClipboardSyncService : Service() {
         clipListener?.let(clipboardManager::removePrimaryClipChangedListener)
         clipListener = null
         syncStarted = false
+        stopLogWatcher()
+        instance = null
         serviceScope.cancel()
         clipboardStatus = "Sincronización inactiva"
         Log.d(TAG, "Clipboard sync stopped")
@@ -268,18 +301,21 @@ class ClipboardSyncService : Service() {
      * ones; lastSyncedItem prevents content from echoing back to its source.
      * Returns whether this step reached the server, for notification retries.
      */
-    private fun runSync(): Boolean {
+    private fun runSync(forceLocalRead: Boolean = false): Boolean {
         val targetUrl = serverUrl
         val targetHost = hostKey
         if (targetUrl.isEmpty()) return false
         return try {
             // Read on every step so the UI checkbox takes effect without a restart.
             shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
-            // Without focus Android denies the read (phone -> PC cannot work in the
-            // background), so do not even try: the denied read only returns null.
-            val canReadLocal = appVisible()
-            val statusSuffix = if (canReadLocal) "" else " · celu → PC solo con la app abierta"
+            // Android 10+ lets only the focused app read the clipboard. forceLocalRead is
+            // used while the transient ClipboardReadActivity holds focus; otherwise do not
+            // even try without focus: the denied read only returns null.
+            val canReadLocal = forceLocalRead || appVisible() ||
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+            val statusSuffix = if (canReadLocal) "" else backgroundStatusSuffix()
             val local = if (canReadLocal) readLocalClip() else null
+            if (forceLocalRead && local != null) Log.d(TAG, "bg read: ${previewOf(local)}")
             if (local != null && local != lastSyncedItem) {
                 if (local.isImage && !shareImagesEnabled) {
                     // Do not let remote content overwrite an unsent local image.
@@ -300,6 +336,9 @@ class ClipboardSyncService : Service() {
             val remote = fetchRemoteClip(targetUrl)
             if (remote != null && remote != lastSyncedItem) {
                 if (local?.isImage == true && !shareImagesEnabled) return true
+                // A phone copy was just detected and is being read: it wins, so do not
+                // overwrite it with the PC's clipboard before that read has finished.
+                if (!forceLocalRead && SystemClock.elapsedRealtime() < localReadPendingUntil) return true
                 applyRemote(remote)
                 lastSyncedItem = remote
                 clipboardStatus = "Portapapeles sincronizado$statusSuffix"
@@ -311,6 +350,119 @@ class ClipboardSyncService : Service() {
             Log.e(TAG, "Sync error with $targetHost: ${e.message}")
             clipboardStatus = "Sin conexión con $targetHost"
             false
+        }
+    }
+
+    /** Our own writes also make the system log a denial for us; those must not trigger a read. */
+    private fun setClipQuietly(clip: ClipData) {
+        suppressTriggersUntil = SystemClock.elapsedRealtime() + OWN_CHANGE_QUIET_MS
+        clipboardManager.setPrimaryClip(clip)
+    }
+
+    private fun previewOf(item: ClipItem): String =
+        if (item.isImage) "<image ${item.png?.size ?: 0} bytes>"
+        else (item.text ?: "").replace("\n", "\\n").take(80)
+
+    /** Empty when background phone -> PC is fully set up; otherwise names what is missing. */
+    private fun backgroundStatusSuffix(): String = when {
+        checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED ->
+            " · Falta permiso READ_LOGS: ver README"
+        !Settings.canDrawOverlays(this) -> " · Falta permiso de superposición: ver README"
+        else -> ""
+    }
+
+    /**
+     * Reads the system log for the line Android prints when a clipboard change is
+     * dispatched to a listener without focus. That line is the only signal an unfocused
+     * app gets that the user copied something.
+     */
+    private fun startLogWatcher() {
+        if (checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "bg trigger disabled: READ_LOGS not granted")
+            return
+        }
+        if (logWatcherThread?.isAlive == true) return
+        val thread = Thread({
+            var backoffMs = 1_000L
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    val process = ProcessBuilder(
+                        // ClipboardService runs in system_server, whose log goes to the system buffer.
+                        "logcat", "-v", "brief", "-b", "system", "-T", "1", "ClipboardService:E", "*:S",
+                    ).redirectErrorStream(true).start()
+                    logWatcher = process
+                    Log.d(TAG, "bg watcher started")
+                    process.inputStream.bufferedReader().useLines { lines ->
+                        for (line in lines) {
+                            backoffMs = 1_000L
+                            if (line.contains("Denying clipboard access to $packageName")) {
+                                onClipboardChangeDetected()
+                            }
+                        }
+                    }
+                } catch (e: InterruptedException) {
+                    return@Thread
+                } catch (e: Exception) {
+                    Log.w(TAG, "logcat watcher error: ${e.message}")
+                }
+                if (Thread.currentThread().isInterrupted) return@Thread
+                Log.w(TAG, "logcat watcher ended (exit=${runCatching { logWatcher?.exitValue() }.getOrNull()}); restarting in ${backoffMs}ms")
+                try {
+                    Thread.sleep(backoffMs)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+                backoffMs = minOf(backoffMs * 2, 30_000L)
+            }
+        }, "clipboard-log-watcher")
+        thread.isDaemon = true
+        logWatcherThread = thread
+        thread.start()
+    }
+
+    private fun stopLogWatcher() {
+        logWatcherThread?.interrupt()
+        logWatcherThread = null
+        logWatcher?.destroy()
+        logWatcher = null
+    }
+
+    private fun onClipboardChangeDetected() {
+        if (appVisible()) return
+        val now = SystemClock.elapsedRealtime()
+        if (now < suppressTriggersUntil) return
+        if (now - lastTriggerAt < TRIGGER_DEBOUNCE_MS) return
+        lastTriggerAt = now
+        Log.d(TAG, "bg trigger: clipboard changed")
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "bg trigger ignored: overlay permission missing")
+            return
+        }
+        if (!readActivityInFlight.compareAndSet(false, true)) return
+        mainHandler.postDelayed({ readActivityInFlight.set(false) }, READ_ACTIVITY_GRACE_MS)
+        // The phone copy wins: hold the PC's clipboard back until it has been read and sent.
+        localReadPendingUntil = now + LOCAL_READ_PENDING_MS
+        try {
+            startActivity(
+                Intent(this, ClipboardReadActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "bg read activity failed: ${e.message}")
+            readActivityInFlight.set(false)
+            localReadPendingUntil = 0L
+        }
+    }
+
+    /** Called by ClipboardReadActivity once it holds focus, so the read is allowed. */
+    fun syncLocalNow(onDone: () -> Unit) {
+        serviceScope.launch {
+            try {
+                recordPollResult(runSync(forceLocalRead = true))
+            } finally {
+                localReadPendingUntil = 0L
+                onDone()
+            }
         }
     }
 
@@ -350,11 +502,11 @@ class ClipboardSyncService : Service() {
         if (item.isImage) {
             val bytes = item.png ?: ByteArray(0)
             val uri = saveImageToMediaStore(bytes) ?: return
-            clipboardManager.setPrimaryClip(ClipData.newUri(contentResolver, "shared", uri))
+            setClipQuietly(ClipData.newUri(contentResolver, "shared", uri))
             Log.d(TAG, "remote applied: <image ${bytes.size} bytes>")
         } else {
             val text = item.text ?: ""
-            clipboardManager.setPrimaryClip(ClipData.newPlainText("shared", text))
+            setClipQuietly(ClipData.newPlainText("shared", text))
             val preview = text.replace("\n", "\\n").take(80)
             Log.d(TAG, "remote applied: $preview")
         }

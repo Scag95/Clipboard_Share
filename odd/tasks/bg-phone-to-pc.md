@@ -72,3 +72,20 @@ clipboard desde una activity transparente fugaz.
   en Build.VERSION.SDK_INT >= Q (minSdk 24 permite lectura en background en
   versiones viejas) y no aplicar un clipboard remoto sobre uno local que no
   se pudo leer/enviar.
+- L3 - IMPLEMENTADO Y VERIFICADO en el celu (SM-S908E, Android 16). Hallazgos al
+  probar, que corrigieron el diseno original: (1) ClipboardService escribe en
+  el buffer system de logcat, no en main: con -b main el watcher no veia nada;
+  (2) Android 12+ muestra el consentimiento "acceder a todos los registros
+  del dispositivo" (solo "por unica vez"); mientras no se acepta, el logcat de
+  la app no recibe nada, y solo puede aceptarse con la app visible; la
+  aprobacion sobrevivio a una reinstalacion (medido una vez); (3) carrera: el
+  polling aplicaba el clipboard de la PC antes de que la activity leyera y
+  pisaba la copia del celu; ahora el servicio retiene el remoto mientras hay
+  una lectura local pendiente (3 s o hasta terminar), asi la copia local gana;
+  (4) las escrituras propias tambien generan la linea de denegacion, por lo
+  que se ignoran 1.5 s tras aplicar un clipboard remoto. Idea descartada: el
+  timestamp de ClipDescription no sirve, en background la descripcion es null
+  y el listener no dispara. Verificado: copia en otra app con la app en
+  background llega a la PC; PC a celu intacto sin triggers espurios; copia
+  del celu y cambio simultaneo en la PC, gana la del celu. NO verificado:
+  imagen con opt-in desactivado en modo background.

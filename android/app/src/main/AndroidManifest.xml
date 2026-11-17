@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.clipboardshare">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -8,6 +9,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Background phone -> PC clipboard (Android 10+ denies reads without focus):
+         READ_LOGS lets the service see the system's clipboard-denial log line, and
+         SYSTEM_ALERT_WINDOW lets it bring a transparent window to the front to read.
+         Neither can be granted from the UI; see README (adb pm grant / appops). -->
+    <uses-permission android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Needed only for MediaStore writes on API < 29 (scoped storage handles 10+). -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
@@ -31,6 +39,14 @@
             android:name=".RemoteControlActivity"
             android:exported="false"
             android:label="Control remoto" />
+        <activity
+            android:name=".ClipboardReadActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service
             android:name=".ClipboardSyncService"
             android:exported="false"

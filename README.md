@@ -177,9 +177,37 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 La beta es de uso personal: APK debug por USB/`adb` o `adb connect` por Wi-Fi,
-sin Play Store. Al elegir un host arranca un servicio con notificación
-persistente (requisito de Android) que mantiene **PC → celu** en segundo
-plano; **celu → PC** y el control remoto requieren la app abierta.
+sin Play Store. El control remoto requiere la pantalla abierta.
+
+### Sync de clipboard en segundo plano (celu → PC)
+
+Al elegir un host arranca un servicio con notificación persistente (requisito
+de Android) que mantiene **PC → celu** en segundo plano sin configurar nada.
+Para el sentido contrario, **celu → PC con la app cerrada**, hay que darle dos
+permisos que Android no deja pedir desde la interfaz (una vez, con el celu
+conectado por `adb`):
+
+```bash
+adb shell pm grant com.clipboardshare android.permission.READ_LOGS
+adb shell appops set com.clipboardshare SYSTEM_ALERT_WINDOW allow
+```
+
+Además Android muestra, al abrir la app, el diálogo **"¿Permitir que Clipboard
+Share acceda a todos los registros del dispositivo?"**: elegí *Permitir acceso
+por única vez*. Es un consentimiento tuyo sobre datos sensibles y solo puede
+aceptarse con la app abierta; si el sistema lo vuelve a pedir (reinicio del
+celu o del proceso), aceptalo de nuevo.
+
+Cómo funciona: Android niega el clipboard a las apps sin foco, pero registra en
+el log del sistema cada cambio dirigido a una app sin foco. El servicio lee esa
+línea (solo la de su propio paquete), abre una fracción de segundo una ventana
+transparente que gana foco, lee el clipboard, lo envía a la PC y la cierra.
+Mientras tanto retiene el clipboard de la PC para que tu copia gane. Sin los
+permisos, el estado de la pantalla remota lo indica ("Falta permiso READ_LOGS:
+ver README") y el servicio sigue sincronizando solo PC → celu.
+
+Es frágil por diseño: depende del texto de un log del sistema, que Android puede
+cambiar entre versiones. Probado en Android 16 (Samsung S24).
 
 ## Estado del proyecto
 
@@ -192,12 +220,10 @@ plano; **celu → PC** y el control remoto requieren la app abierta.
   Linux.
 - Cliente Android: home con lista de hosts (vivos + recordados), tokens por
   host con reconexión transparente, sincronización bidireccional de texto e
-  imágenes (PNG) **con la app abierta**, y **PC → celu también en segundo
-  plano** vía ForegroundService atado al último host elegido (tras reiniciar
-  el teléfono alcanza con abrir la app una vez para reactivar el servicio).
-  Limitación de Android 10+: sin foco la app no puede leer el clipboard, así
-  que **celu → PC solo funciona con la app abierta**; el envío automático en
-  segundo plano está especificado en `odd/tasks/bg-phone-to-pc.md` (pendiente).
-  Control remoto (trackpad + teclado + botones de click) en su propia pantalla.
+  imágenes (PNG) y control remoto (trackpad + teclado + botones de click) en su
+  propia pantalla. El sync corre en segundo plano vía ForegroundService atado
+  al último host elegido: PC → celu sin configuración, y celu → PC con la app
+  cerrada tras dar dos permisos por `adb` (ver "Sync de clipboard en segundo
+  plano"; tras reiniciar el teléfono alcanza con abrir la app una vez).
 - Tests: handlers HTTP del server, broker de pairing, parser de eventos y
   stream WebSocket (`internal/api`, `internal/pair`, `internal/input`).
