@@ -26,8 +26,9 @@ launcher.
   `{ok,error,message,requests[],devices[]}`. No hay push: el panel refresca
   con `list` periódico (~1 s). Las solicitudes pendientes caducan a los 90 s.
 
-- **S4 — Qué muestra y permite**: estado del servidor (socket alcanzable y
-  `GET /health` en `CLIPBOARD_SHARE_PORT`, por defecto 8765; nombre de host);
+- **S4 — Qué muestra y permite**: estado del servidor (socket de control alcanzable: ese socket lo sirve
+  el propio proceso del servidor, así que no hace falta `/health`; nombre de
+  host);
   solicitudes pendientes con **Aprobar** / **Rechazar** (nombre, IP, hace
   cuánto); dispositivos aprobados con **Revocar** (nombre, IP, primera
   aprobación). Si el servidor no responde, la ventana lo dice con la causa
@@ -60,7 +61,7 @@ launcher.
 ## Tasks
 
 - [x] **T1** (S1-S9) — este documento y el corte de slice. Route: inline. Commit: ver git log (docs(odd): linux-app feature doc)
-- [ ] **T2** (S3, S4, S7) — backend C++ + tests Qt Test. Route: inline, test-first. Commit: pendiente
+- [x] **T2** (S3, S4, S7) — backend C++ + tests Qt Test (9 casos; RED observado antes de implementar). Route: inline, test-first. Commit: ver git log (feat(panel): control socket backend)
 - [ ] **T3** (S2, S4, S5, S6) — UI QML, bandeja, tema Omarchy, `qsTr`. Route: inline. Commit: pendiente
 - [ ] **T4** (S8) — PKGBUILD, servicio de usuario, udev, `.desktop`, ícono. Route: inline. Commit: pendiente
 - [ ] **T5** (S9) — README, E2E en esta máquina (servicio + panel + emparejar el celu), cierre. Route: inline. Commit: pendiente
@@ -89,3 +90,9 @@ aparte si el usuario prefiere partir la rama.
   lectura (`internal/pair/pair.go:495-628`, `cmd/server/main.go:141-202`):
   no hay push, `DeviceInfo` no tiene `lastSeen`; no existen PKGBUILD, unit,
   `.desktop` ni ícono en el repo.
+- **L3** — Decisión de T2: se descarta `GET /health` del panel (spec S4 reescrita):
+  el socket de control lo sirve el mismo proceso, alcanzarlo ya prueba que el
+  servidor corre. Hallazgo de los tests: el `list` de refresco posterior a una
+  acción borraba su error en <1 s; el error de acción ahora persiste hasta la
+  próxima acción. Sin catálogos i18n por ahora: textos con `qsTr`/`tr`, en
+  inglés, sin el `Translator` de la plantilla (S2 sigue cumplida).
