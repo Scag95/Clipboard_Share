@@ -63,8 +63,8 @@ launcher.
 ## Tasks
 
 - [x] **T1** (S1-S9) — este documento y el corte de slice. Route: inline. Commit: ver git log (docs(odd): linux-app feature doc)
-- [x] **T2** (S3, S4, S7) — backend C++ + tests Qt Test (9 casos; RED observado antes de implementar). Route: inline, test-first. Commit: ver git log (feat(panel): control socket backend)
-- [x] **T3** (S2, S4, S5, S6) — UI QML, bandeja, tema Omarchy, `qsTr`. Route: inline. Commit: `5b5535e` (UI 8/8 + backend 9/9 offscreen; en vivo: arranque oculto, aparece ante solicitud real, StatusNotifierItem registrado)
+- [x] **T2** (S3, S4, S7) — backend C++ + tests Qt Test (7 casos; RED observado antes de implementar). Route: inline, test-first. Commit: ver git log (feat(panel): control socket backend)
+- [x] **T3** (S2, S4, S5, S6) — UI QML, bandeja, tema Omarchy, `qsTr`. Route: inline. Commit: `5b5535e` (tests offscreen: 6 casos de UI + 7 de backend; en vivo: arranque oculto, aparece ante solicitud real, StatusNotifierItem registrado)
 - [x] **T4** (S8) — PKGBUILD, servicio de usuario, udev, `.desktop`, ícono. Route: worker (archivos) + build inline. Commit: `1b8f29c` (makepkg OK; el paquete contiene los 7 paths; **instalar y arrancar el servicio requiere sudo del usuario: sin probar**)
 - [ ] **T5** (S9) — README, E2E en esta máquina (servicio + panel + emparejar el celu), cierre. Route: inline. Commit: ver git log (README hecho; E2E con el paquete instalado pendiente del sudo del usuario)
 
@@ -114,3 +114,9 @@ aparte si el usuario prefiere partir la rama.
   justo emparejaba a un atacante con control de mouse y teclado. Reproducido
   con dos tests en RED antes de corregir. Corrección: la solicitud se avisa
   desde la bandeja y no abre la ventana; se elimina el atajo `A`.
+- **L7** — Corrección de conteos (review R2-002): "9/9" y "8/8" contaban
+  `initTestCase` y `cleanupTestCase`. Casos reales tras el último commit: 7 de
+  backend y 8 de UI (los 6 de T3, donde la tecla `A` se reemplazó por una
+  prueba de que ninguna tecla aprueba, más 1 de que una solicitud no abre la
+  ventana (R1-001) y 1 de texto plano (R1-002)). `bin/test` imprime
+  `Totals: 9 passed` (7 + init/cleanup) y `Totals: 10 passed` (8 + init/cleanup).
