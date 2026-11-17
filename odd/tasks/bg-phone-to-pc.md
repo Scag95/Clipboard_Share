@@ -89,3 +89,14 @@ clipboard desde una activity transparente fugaz.
   background llega a la PC; PC a celu intacto sin triggers espurios; copia
   del celu y cambio simultaneo en la PC, gana la del celu. NO verificado:
   imagen con opt-in desactivado en modo background.
+- L4 - Review nativo (opus, 4 lentes) hallo R4-001 CRITICAL: la ventana
+  transparente retenia el foco durante todo el viaje de red (push + fetch),
+  asi que con la PC dormida o el Wi-Fi lento quedaba una ventana a pantalla
+  completa tragandose los toques hasta que vencian los timeouts HTTP, y si el
+  servicio moria antes quedaba invisible hasta apretar atras. Correccion:
+  la activity solo necesita foco para LEER; el servicio lee el clipboard y
+  avisa (onCaptured) antes de tocar la red, la activity se cierra al instante
+  y el envio corre despues en el scope del servicio; ademas un tope duro de
+  2.5 s que ya no se cancela al ganar foco. Medido en el celu con eventos del
+  sistema: con la PC caida la ventana vive 0.38 s (create->finish), con la PC
+  arriba 0.16 s.

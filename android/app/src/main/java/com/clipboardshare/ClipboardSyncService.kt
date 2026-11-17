@@ -301,20 +301,21 @@ class ClipboardSyncService : Service() {
      * ones; lastSyncedItem prevents content from echoing back to its source.
      * Returns whether this step reached the server, for notification retries.
      */
-    private fun runSync(forceLocalRead: Boolean = false): Boolean {
+    private fun runSync(capturedLocal: ClipItem? = null): Boolean {
         val targetUrl = serverUrl
         val targetHost = hostKey
         if (targetUrl.isEmpty()) return false
         return try {
             // Read on every step so the UI checkbox takes effect without a restart.
             shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
-            // Android 10+ lets only the focused app read the clipboard. forceLocalRead is
-            // used while the transient ClipboardReadActivity holds focus; otherwise do not
+            // Android 10+ lets only the focused app read the clipboard. capturedLocal is
+            // the item ClipboardReadActivity read while it held focus; otherwise do not
             // even try without focus: the denied read only returns null.
+            val forceLocalRead = capturedLocal != null
             val canReadLocal = forceLocalRead || appVisible() ||
                 Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
             val statusSuffix = if (canReadLocal) "" else backgroundStatusSuffix()
-            val local = if (canReadLocal) readLocalClip() else null
+            val local = capturedLocal ?: if (canReadLocal) readLocalClip() else null
             if (forceLocalRead && local != null) Log.d(TAG, "bg read: ${previewOf(local)}")
             if (local != null && local != lastSyncedItem) {
                 if (local.isImage && !shareImagesEnabled) {
@@ -454,14 +455,24 @@ class ClipboardSyncService : Service() {
         }
     }
 
-    /** Called by ClipboardReadActivity once it holds focus, so the read is allowed. */
-    fun syncLocalNow(onDone: () -> Unit) {
+    /**
+     * Called by ClipboardReadActivity once it holds focus, so the read is allowed.
+     * [onCaptured] runs right after the clipboard has been read and before any network
+     * work, so the window can close at once; the push to the PC happens afterwards.
+     */
+    fun captureLocalClipAndSync(onCaptured: () -> Unit) {
         serviceScope.launch {
+            val item = try {
+                readLocalClip()
+            } catch (e: Exception) {
+                Log.e(TAG, "bg read failed: ${e.message}")
+                null
+            }
+            onCaptured()
             try {
-                recordPollResult(runSync(forceLocalRead = true))
+                recordPollResult(runSync(capturedLocal = item))
             } finally {
                 localReadPendingUntil = 0L
-                onDone()
             }
         }
     }
