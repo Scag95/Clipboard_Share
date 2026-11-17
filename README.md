@@ -77,14 +77,17 @@ systemctl --user enable --now clipboard-share                        # servidor
 ```
 
 El panel (`clipboard-share-panel`) arranca solo con la sesión, oculto en la
-bandeja; cuando un teléfono pide emparejarse, **la ventana aparece sola**:
+bandeja; cuando un teléfono pide emparejarse, **la bandeja avisa** (clic en el
+aviso o en el ícono abre el panel). La ventana nunca se abre sola ni toma foco:
+cualquiera en la LAN puede mandar una solicitud, y aprobar es siempre un clic
+deliberado en el botón:
 
 - **Aprobar / Rechazar** cada solicitud (caducan a los 90 s).
 - **Revocar** un dispositivo emparejado (pide confirmación).
 - Estado del servidor; si no corre, lo dice y sugiere
   `systemctl --user start clipboard-share`.
-- Teclas: `A` aprueba la solicitud más nueva, `?` ayuda, `Esc` oculta a la
-  bandeja, `Q` sale. Clic en el ícono de la bandeja muestra/oculta la ventana.
+- Teclas: `?` ayuda, `Esc` oculta a la bandeja, `Q` sale. Clic en el ícono de
+  la bandeja muestra/oculta la ventana. No hay atajo de teclado para aprobar.
 
 La regla udev usa `uaccess`: el usuario con sesión activa puede usar
 `/dev/uinput` sin pertenecer al grupo `input`. Detalles del paquete en
@@ -155,7 +158,7 @@ El server puede recibir input del teléfono (especificación en
 
 1. En el teléfono, tocar **Conectar** en la pantalla de control remoto.
 2. En el PC aparece una notificación y el **panel** muestra la solicitud:
-   tocar **Aprobar** (o `A`). El CLI sigue disponible para scripts:
+   tocar **Aprobar**. El CLI sigue disponible para scripts:
 
    ```bash
    clipboard-share pair --last   # aprueba el request más nuevo

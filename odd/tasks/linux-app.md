@@ -36,11 +36,13 @@ launcher.
 
 - **S5 — Bandeja**: ícono en la bandeja; clic alterna la ventana; cerrar la
   ventana la oculta (el panel sigue vivo); menú con Abrir y Salir. Una
-  solicitud nueva muestra la ventana o resalta el ícono; `--background`
+  solicitud nueva se avisa desde la bandeja (clic abre el panel) y **nunca**
+  abre la ventana ni toma foco (review R1-001: cualquiera en la LAN puede
+  mandar solicitudes); `--background`
   arranca oculto (para autostart). Una sola instancia.
 
-- **S6 — Teclado primero**: `?` muestra los atajos, `Q` sale, `A` aprueba la
-  solicitud más reciente (equivale a `pair --last`).
+- **S6 — Teclado**: `?` muestra los atajos, `Esc` oculta, `Q` sale. No hay atajo
+  para aprobar: aprobar es un clic deliberado (review R1-001).
 
 - **S7 — Se puede probar sin pantalla**: el backend (cliente del socket,
   parseo de respuestas, estado) es una clase `QObject` con tests Qt Test que
@@ -106,3 +108,9 @@ aparte si el usuario prefiere partir la rama.
 - **L5** — El worker de T4 dejó `makepkg` bloqueado por `go` (solo provisto por
   mise); se construyó con `mise exec go@1.24 -- makepkg -f --nodeps --nocheck`
   (solo salta el chequeo de la dependencia de build).
+- **L6** — El review nativo (opus, 4 lentes + refuter) encontró R1-001 CRITICAL:
+  una solicitud de la LAN abría la ventana con foco y la tecla `A` sin
+  modificador aprobaba la más nueva, así que teclear en otra app en el momento
+  justo emparejaba a un atacante con control de mouse y teclado. Reproducido
+  con dos tests en RED antes de corregir. Corrección: la solicitud se avisa
+  desde la bandeja y no abre la ventana; se elimina el atajo `A`.

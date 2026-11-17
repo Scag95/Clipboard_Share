@@ -26,11 +26,11 @@ class UiTests : public QObject {
         Theme theme;
         QQmlApplicationEngine engine;
         QQuickWindow *window = nullptr;
-        Session(const QString &path, std::function<void(FakeServer &)> setup)
+        Session(const QString &path, std::function<void(FakeServer &)> setup, bool startHidden = false)
             : server(path), backend((setup(server), path), 100), theme(path + ".theme") {
             engine.rootContext()->setContextProperty("theme", &theme);
             engine.rootContext()->setContextProperty("backend", &backend);
-            engine.rootContext()->setContextProperty("startHidden", false);
+            engine.rootContext()->setContextProperty("startHidden", startHidden);
             engine.load(QUrl("qrc:/Main.qml"));
             window = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0));
         }
@@ -93,7 +93,10 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(sawCommand(s.server, "deny"), 3000);
     }
 
-    void keyAApprovesTheNewestRequest() {
+    // A pairing request can come from anyone on the LAN. If it opened the window and
+    // a bare key approved it, typing in another app at the wrong moment would pair
+    // an attacker with the desktop's mouse and keyboard.
+    void aKeyPressNeverApprovesARequest() {
         Session s(m_path, [](FakeServer &srv) { srv.requests = {request("r3", "Pixel", "192.168.0.13")}; });
         QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, "Approve") != nullptr, 3000);
         s.window->show();
@@ -101,8 +104,22 @@ private slots:
         QVERIFY(QTest::qWaitForWindowActive(s.window));
 
         QTest::keyClick(s.window, Qt::Key_A);
+        QTest::keyClick(s.window, Qt::Key_A, Qt::ControlModifier);
+        QTest::qWait(400);
 
-        QTRY_VERIFY_WITH_TIMEOUT(sawCommand(s.server, "approve-last"), 3000);
+        QVERIFY(!sawCommand(s.server, "approve-last"));
+        QVERIFY(!sawCommand(s.server, "approve"));
+    }
+
+    void aNewRequestDoesNotOpenAHiddenWindow() {
+        Session s(m_path, [](FakeServer &srv) { srv.requests = {request("r4", "Attacker", "10.0.0.9")}; }, true);
+        QVERIFY(s.window);
+        QVERIFY(!s.window->isVisible());
+
+        QTRY_COMPARE_WITH_TIMEOUT(s.backend.requests().size(), 1, 3000);
+        QTest::qWait(300);
+
+        QVERIFY2(!s.window->isVisible(), "a request from the network opened the window and took focus");
     }
 
     void revokeAsksForConfirmationAndOnlyThenRevokes() {

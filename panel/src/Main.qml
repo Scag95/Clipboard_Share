@@ -37,11 +37,16 @@ ApplicationWindow {
         }
     }
 
+    // Anyone on the LAN can send a pairing request, so a request must never take
+    // focus or open the window: the user could be typing in another app and a
+    // stray keypress or click would approve a stranger. It is announced from the
+    // tray instead, and the user opens the panel on purpose.
     Connections {
         target: backend
-        // A phone asking to pair is the one thing the user must act on, so the
-        // window comes forward; the server also sends a desktop notification.
-        function onNewRequest(name, ip) { window.showPanel() }
+        function onNewRequest(name, ip) {
+            tray.showMessage(qsTr("Pairing request"), qsTr("%1 (%2) wants to pair").arg(name).arg(ip),
+                             Platform.SystemTrayIcon.Information, 15000)
+        }
     }
 
     Platform.SystemTrayIcon {
@@ -56,6 +61,7 @@ ApplicationWindow {
             Platform.MenuSeparator {}
             Platform.MenuItem { text: qsTr("Quit"); onTriggered: Qt.quit() }
         }
+        onMessageClicked: window.showPanel()
         onActivated: function(reason) {
             if (reason === Platform.SystemTrayIcon.Trigger)
                 window.visible ? window.hide() : window.showPanel()
@@ -63,7 +69,6 @@ ApplicationWindow {
     }
 
     Shortcut { sequence: "Q"; context: Qt.ApplicationShortcut; onActivated: Qt.quit() }
-    Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: backend.requests.length > 0; onActivated: backend.approveLast() }
     Shortcut { sequence: "?"; context: Qt.ApplicationShortcut; onActivated: help.open() }
     Shortcut { sequence: "Escape"; context: Qt.ApplicationShortcut; onActivated: window.hasTray ? window.hide() : Qt.quit() }
 
@@ -286,8 +291,6 @@ ApplicationWindow {
         GridLayout {
             columns: 2
             columnSpacing: 20
-            Label { text: "A"; font.bold: true }
-            Label { text: qsTr("Approve the newest request") }
             Label { text: "Esc"; font.bold: true }
             Label { text: qsTr("Hide to the tray") }
             Label { text: "Q"; font.bold: true }
