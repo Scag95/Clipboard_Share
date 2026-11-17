@@ -23,7 +23,10 @@ class ClipboardReadActivity : Activity() {
         super.onCreate(savedInstanceState)
         // Hard cap that is never cancelled: whatever happens (no focus, service gone,
         // a slow clipboard provider), this window closes.
-        handler.postDelayed({ finishQuietly("closed (time limit)") }, HARD_LIMIT_MS)
+        handler.postDelayed(
+            { finishQuietly("closed (time limit)") },
+            ClipboardTriggerPolicy.READ_WINDOW_LIMIT_MS,
+        )
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -55,6 +58,5 @@ class ClipboardReadActivity : Activity() {
 
     private companion object {
         const val TAG = "ClipboardShare"
-        const val HARD_LIMIT_MS = 2_500L
     }
 }
