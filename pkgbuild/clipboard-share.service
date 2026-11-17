@@ -1,0 +1,12 @@
+[Unit]
+Description=Clipboard Share server (clipboard sync and remote input for paired phones)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/clipboard-share
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

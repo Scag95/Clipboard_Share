@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Main.qml</file>
+        <file alias="clipboard-share.svg">../../pkgbuild/clipboard-share.svg</file>
+    </qresource>
+</RCC>
