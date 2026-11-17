@@ -67,10 +67,15 @@ void Backend::send(const QJsonObject &command, bool refreshAfter) {
     timeout->setInterval(kExchangeTimeoutMs);
 
     auto finish = [this, socket, isList] {
-        if (isList)
-            m_listInFlight = false;
         socket->disconnect(this);
         socket->deleteLater();
+        if (!isList)
+            return;
+        m_listInFlight = false;
+        if (m_refreshPending) {
+            m_refreshPending = false;
+            refresh();
+        }
     };
 
     connect(timeout, &QTimer::timeout, this, [this, socket, finish] {
@@ -93,22 +98,31 @@ void Backend::send(const QJsonObject &command, bool refreshAfter) {
             return;
         const auto response = QJsonDocument::fromJson(socket->readLine()).object();
         const bool ok = response.value("ok").toBool();
+        const State before = state();
         m_online = true;
         if (!isList) {
             // The outcome of the user's last action stays visible until the next
             // action; the refresh that follows must not wipe it a moment later.
             m_message = ok ? response.value("message").toString() : QString();
-            m_error = ok ? QString() : response.value("error").toString(tr("The server rejected the command"));
+            m_error = ok ? QString() : errorOf(response);
             m_errorFromAction = !ok;
         } else if (!m_errorFromAction) {
-            m_error = ok ? QString() : response.value("error").toString(tr("The server rejected the command"));
+            m_error = ok ? QString() : errorOf(response);
         }
         if (isList && ok)
             applyList(response);
-        emit changed();
+        // The Repeaters rebuild their delegates on changed(), so a poll that
+        // brings the same state stays silent. An action always reports, even
+        // when its message repeats the previous one.
+        if (!isList || state() != before)
+            emit changed();
         finish();
-        if (refreshAfter)
-            refresh();
+        if (refreshAfter) {
+            if (m_listInFlight)
+                m_refreshPending = true;
+            else
+                refresh();
+        }
     });
     socket->connectToServer(m_socketPath);
 }
@@ -136,11 +150,18 @@ void Backend::applyList(const QJsonObject &response) {
 }
 
 void Backend::setOffline(const QString &reason) {
+    const State before = state();
     m_online = false;
     m_error = reason;
     m_errorFromAction = false;
     m_requests.clear();
     m_devices.clear();
-    m_seenRequests.clear();
-    emit changed();
+    // m_seenRequests survives the outage: requests still pending when the
+    // server comes back were already announced.
+    if (state() != before)
+        emit changed();
+}
+
+QString Backend::errorOf(const QJsonObject &response) const {
+    return response.value("error").toString(tr("The server rejected the command"));
 }

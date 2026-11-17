@@ -21,6 +21,10 @@ public:
     QString accentForeground() const;
     int radius() const { return m_radius; }
 
+    // Omarchy's default accent: used until a theme's colors.toml names one, and
+    // when it names none.
+    static constexpr const char *DefaultAccent = "#FFD60A";
+
     static QString readAccent(const QString &path);
 
 signals:
@@ -31,7 +35,7 @@ private:
     void refreshRounding();
 
     QString m_directory;
-    QString m_accent = "#FFD60A";
+    QString m_accent = QString::fromLatin1(DefaultAccent);
     QFileSystemWatcher m_watcher;
     QTimer m_debounce;
     QString m_hyprctl;

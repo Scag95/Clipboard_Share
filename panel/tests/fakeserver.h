@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QTimer>
 #include <QtTest>
 
 namespace fake {
@@ -24,8 +25,22 @@ public:
                 while (socket->canReadLine()) {
                     const auto command = QJsonDocument::fromJson(socket->readLine()).object();
                     commands.append(command);
-                    socket->write(QJsonDocument(nextResponse(command)).toJson(QJsonDocument::Compact) + "\n");
-                    socket->flush();
+                    // A hung server: it accepted the connection and read the
+                    // command, but never answers.
+                    if (silent)
+                        continue;
+                    // The response is taken now, so a delayed list carries the
+                    // state as it was when the command arrived (a stale list).
+                    const QByteArray line = QJsonDocument(nextResponse(command)).toJson(QJsonDocument::Compact) + "\n";
+                    const int delay = command.value("cmd").toString() == "list" ? listDelayMs : 0;
+                    auto answer = [socket, line] {
+                        socket->write(line);
+                        socket->flush();
+                    };
+                    if (delay > 0)
+                        QTimer::singleShot(delay, socket, answer);
+                    else
+                        answer();
                 }
             });
             connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
@@ -44,6 +59,8 @@ public:
     QJsonArray requests, devices;
     QString actionMessage = "Approved pair request.";
     QString actionError;
+    bool silent = false;
+    int listDelayMs = 0;
     QList<QJsonObject> commands;
 
 private:

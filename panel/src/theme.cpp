@@ -70,7 +70,7 @@ QString Theme::readAccent(const QString &path) {
         if (match.hasMatch())
             return match.captured(1);
     }
-    return "#FFD60A";
+    return QString::fromLatin1(DefaultAccent);
 }
 
 // Black or white, whichever reads on the accent (WCAG relative luminance).

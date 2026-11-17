@@ -3,6 +3,7 @@
 
 #include <QCommandLineParser>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QLocalServer>
@@ -13,25 +14,50 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QStandardPaths>
+#include <QSysInfo>
+#include <QThread>
 #include <QUrl>
+
+#include <cerrno>
+#include <csignal>
+#include <cstdio>
 
 #include "backend.h"
 #include "theme.h"
 
 namespace {
 
-const QString kActivationName = "clipboard-share-panel";
+// The user's runtime directory, private to them, like the lock beside it.
+QString runtimeDirectory() {
+    const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    return runtime.isEmpty() ? QDir::tempPath() : runtime;
+}
 
-// Asks the already-running panel to show its window. Returns false when there
-// is none to ask, so a stale lock never keeps the panel from starting.
-bool activateRunningInstance() {
-    QLocalSocket socket;
-    socket.connectToServer(kActivationName);
-    if (!socket.waitForConnected(500))
-        return false;
-    socket.write("show\n");
-    socket.waitForBytesWritten(500);
-    return true;
+// Asks the already-running panel to show its window. A panel that is still
+// starting listens moments after taking the lock, so keep trying for a while.
+// Returns false when nobody answers in that time.
+bool activateRunningInstance(const QString &path) {
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < 2000) {
+        QLocalSocket socket;
+        socket.connectToServer(path);
+        if (socket.waitForConnected(200)) {
+            socket.write("show\n");
+            socket.waitForBytesWritten(500);
+            return true;
+        }
+        QThread::msleep(100);
+    }
+    return false;
+}
+
+// Whether the process that holds the lock still runs. A lock from another
+// host cannot be checked, so it counts as alive.
+bool lockHolderAlive(qint64 pid, const QString &host) {
+    if (host != QSysInfo::machineHostName())
+        return true;
+    return pid > 0 && (::kill(pid_t(pid), 0) == 0 || errno == EPERM);
 }
 
 } // namespace
@@ -55,17 +81,49 @@ int main(int argc, char *argv[]) {
     parser.process(app);
 
     // One panel per session: a second launch only raises the first.
-    const QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
-    QLockFile lock((runtime.isEmpty() ? QDir::tempPath() : runtime) + "/clipboard-share-panel.lock");
+    const QString runtime = runtimeDirectory();
+    const QString activationPath = runtime + "/clipboard-share-panel.socket";
+    QLockFile lock(runtime + "/clipboard-share-panel.lock");
     lock.setStaleLockTime(0);
     if (!lock.tryLock(0)) {
-        if (activateRunningInstance())
+        if (activateRunningInstance(activationPath))
             return 0;
-        // Lock held but nobody answers: the previous panel died without cleanup.
-        lock.removeStaleLockFile();
-        if (!lock.tryLock(0))
+        // Only a lock whose owner is gone may be removed; a live panel that does
+        // not answer keeps it, rather than two panels running side by side.
+        qint64 pid = 0;
+        QString host, owner;
+        if (lock.getLockInfo(&pid, &host, &owner) && lockHolderAlive(pid, host)) {
+            std::fprintf(stderr, "clipboard-share-panel: another panel (pid %lld) holds %s but does not answer\n",
+                         static_cast<long long>(pid), qPrintable(lock.fileName()));
             return 1;
+        }
+        lock.removeStaleLockFile();
+        if (!lock.tryLock(0)) {
+            std::fprintf(stderr, "clipboard-share-panel: cannot take the lock %s\n", qPrintable(lock.fileName()));
+            return 1;
+        }
     }
+
+    // Listen for "show" from a second launch right after taking the lock, before
+    // the slow QML load, so a launch in between finds the socket. A socket left
+    // by a panel that died is ours to replace: we hold the lock.
+    QQuickWindow *window = nullptr;
+    bool showRequested = false;
+    QLocalServer activation;
+    activation.setSocketOptions(QLocalServer::UserAccessOption);
+    QObject::connect(&activation, &QLocalServer::newConnection, &app, [&] {
+        while (auto *client = activation.nextPendingConnection()) {
+            client->deleteLater();
+            if (window)
+                QMetaObject::invokeMethod(window, "showPanel");
+            else
+                showRequested = true;
+        }
+    });
+    QLocalServer::removeServer(activationPath);
+    if (!activation.listen(activationPath))
+        std::fprintf(stderr, "clipboard-share-panel: cannot listen on %s (%s); a second launch will not raise this one\n",
+                     qPrintable(activationPath), qPrintable(activation.errorString()));
 
     QQuickStyle::setStyle("Material");
 
@@ -80,18 +138,9 @@ int main(int argc, char *argv[]) {
     if (engine.rootObjects().isEmpty())
         return 1;
 
-    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
-
-    // Receives "show" from a second launch.
-    QLocalServer activation;
-    QLocalServer::removeServer(kActivationName);
-    QObject::connect(&activation, &QLocalServer::newConnection, &app, [&activation, window] {
-        if (auto *client = activation.nextPendingConnection()) {
-            client->deleteLater();
-            QMetaObject::invokeMethod(window, "showPanel");
-        }
-    });
-    activation.listen(kActivationName);
+    window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    if (showRequested)
+        QMetaObject::invokeMethod(window, "showPanel");
 
     return app.exec();
 }

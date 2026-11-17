@@ -2,6 +2,8 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+# The single-instance tests launch the real panel binary (offscreen, isolated).
+"$ROOT/bin/build"
 for suite in panel_tests ui_tests; do
     mkdir -p "$ROOT/build/$suite-dir"
     cd "$ROOT/build/$suite-dir"

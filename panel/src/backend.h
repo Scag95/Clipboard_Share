@@ -50,10 +50,26 @@ private:
     void send(const QJsonObject &command, bool refreshAfter);
     void applyList(const QJsonObject &response);
     void setOffline(const QString &reason);
+    QString errorOf(const QJsonObject &response) const;
+
+    // What changed() announces; compared so an unchanged poll stays silent.
+    struct State {
+        bool online;
+        QString error, message;
+        QVariantList requests, devices;
+        bool operator!=(const State &other) const {
+            return online != other.online || error != other.error || message != other.message ||
+                   requests != other.requests || devices != other.devices;
+        }
+    };
+    State state() const { return {m_online, m_error, m_message, m_requests, m_devices}; }
 
     QString m_socketPath;
     QTimer m_poll;
     bool m_listInFlight = false;
+    // An action finished while a list was in flight: that list may predate the
+    // action, so another one runs as soon as it completes.
+    bool m_refreshPending = false;
     bool m_online = false;
     QString m_error;
     bool m_errorFromAction = false;

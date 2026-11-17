@@ -49,15 +49,21 @@ class UiTests : public QObject {
     }
 
     static QQuickItem *itemWithText(QQuickWindow *window, const QString &text) {
-        // Popups (the revoke dialog) live in the overlay, outside the content item.
-        if (auto *found = itemWithText(window->contentItem(), text))
-            return found;
-        return nullptr;
+        // Popups (the revoke dialog) are reparented to the window's overlay, which
+        // is itself a child item of the content item, so this walk reaches them.
+        return itemWithText(window->contentItem(), text);
     }
 
     static void click(QQuickWindow *window, QQuickItem *item) {
         const QPointF center = item->mapToScene(QPointF(item->width() / 2, item->height() / 2));
         QTest::mouseClick(window, Qt::LeftButton, {}, center.toPoint());
+    }
+
+    static int sawCount(const FakeServer &server, const QString &cmd) {
+        int n = 0;
+        for (const auto &command : server.commands)
+            n += command.value("cmd").toString() == cmd;
+        return n;
     }
 
     static bool sawCommand(const FakeServer &server, const QString &cmd) {
@@ -82,6 +88,21 @@ private slots:
         for (const auto &command : s.server.commands)
             if (command.value("cmd").toString() == "approve")
                 QCOMPARE(command.value("request").toString(), QString("r1"));
+    }
+
+    // Polls that bring the same list must not rebuild the cards: a click that
+    // crosses a rebuild would land on a delegate being destroyed.
+    void unchangedPollsKeepTheSameCards() {
+        Session s(m_path, [](FakeServer &srv) { srv.requests = {request("r6", "Pixel", "192.168.0.13")}; });
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, "Approve") != nullptr, 3000);
+        const QPointer<QQuickItem> button = itemWithText(s.window, "Approve");
+        const int polls = sawCount(s.server, "list");
+
+        QTRY_VERIFY_WITH_TIMEOUT(sawCount(s.server, "list") >= polls + 3, 3000);
+        QTest::qWait(150);
+
+        QVERIFY2(!button.isNull(), "a poll with the same list destroyed the card");
+        QCOMPARE(itemWithText(s.window, "Approve"), button.data());
     }
 
     void denyButtonSendsDeny() {
