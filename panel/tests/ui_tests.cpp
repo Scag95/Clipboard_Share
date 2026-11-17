@@ -111,6 +111,25 @@ private slots:
         QVERIFY(!sawCommand(s.server, "approve"));
     }
 
+    // The device name comes from an unauthenticated request. Rendered as rich text,
+    // markup in it could fake the approval card exactly where the user decides.
+    void remoteSuppliedTextIsShownAsPlainText() {
+        const QString hostile = "<h1>Trusted laptop</h1>";
+        Session s(m_path, [&](FakeServer &srv) {
+            srv.requests = {request("r5", hostile, "<b>10.0.0.1</b>")};
+            srv.devices = {device("d5", hostile, "<b>10.0.0.2</b>")};
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, hostile) != nullptr, 3000);
+
+        QCOMPARE(itemWithText(s.window, hostile)->property("textFormat").toInt(), int(Qt::PlainText));
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, "Revoke") != nullptr, 3000);
+        click(s.window, itemWithText(s.window, "Revoke"));
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, "Cancel") != nullptr, 3000);
+        const auto dialogText = QString("%1 will lose access and has to ask for approval again.").arg(hostile);
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, dialogText) != nullptr, 3000);
+        QCOMPARE(itemWithText(s.window, dialogText)->property("textFormat").toInt(), int(Qt::PlainText));
+    }
+
     void aNewRequestDoesNotOpenAHiddenWindow() {
         Session s(m_path, [](FakeServer &srv) { srv.requests = {request("r4", "Attacker", "10.0.0.9")}; }, true);
         QVERIFY(s.window);

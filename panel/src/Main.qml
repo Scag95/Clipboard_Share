@@ -191,9 +191,10 @@ ApplicationWindow {
                     model: backend.requests
                     delegate: Card {
                         required property var modelData
-                        Label { text: modelData.name; font.pixelSize: 16; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
+                        Label { text: modelData.name; textFormat: Text.PlainText; font.pixelSize: 16; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
                         Label {
                             text: modelData.ip + "  -  " + window.ago(modelData.requestedAt)
+                            textFormat: Text.PlainText
                             color: "#9aa0a6"
                             font.pixelSize: 12
                         }
@@ -234,9 +235,10 @@ ApplicationWindow {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 2
-                                Label { text: modelData.name; font.pixelSize: 15; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
+                                Label { text: modelData.name; textFormat: Text.PlainText; font.pixelSize: 15; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
                                 Label {
                                     text: qsTr("%1  -  paired %2").arg(modelData.ip).arg(window.day(modelData.firstApproved))
+                                    textFormat: Text.PlainText
                                     color: "#9aa0a6"
                                     font.pixelSize: 12
                                 }
@@ -265,7 +267,8 @@ ApplicationWindow {
         }
     }
 
-    // Revoking cuts a phone off, so ask first.
+    // Names and IPs come from unauthenticated requests: always plain text, never
+    // interpreted as markup. Revoking cuts a phone off, so ask first.
     Dialog {
         id: revokeDialog
         anchors.centerIn: parent
@@ -277,6 +280,7 @@ ApplicationWindow {
         width: Math.min(360, window.width - 32)
         contentItem: Label {
             wrapMode: Text.Wrap
+            textFormat: Text.PlainText
             text: qsTr("%1 will lose access and has to ask for approval again.").arg(window.revokeName)
         }
         onAccepted: backend.revoke(window.revokeId)
