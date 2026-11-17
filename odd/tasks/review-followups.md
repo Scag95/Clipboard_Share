@@ -134,3 +134,13 @@ Android, `review-42138c68e1bdbbdb`, y el panel de Linux,
   (ecos reales por escritura), A8 (`-v epoch` filtra la línea repetida) y A9
   (aviso sin consentimiento de logs). El formato real de `-v epoch` sí se
   comprobó contra el parser.
+- **L4** — Re-verificación de `ec8a9e4`: A5 y A6 volvieron a FAIL por una regresión
+  mía (el guard "el llamador es el hilo watcher", pensado para A6, bloqueaba el
+  disparo diferido de A5 que corre en el hilo principal, y la comprobación seguía
+  sin ser atómica con `onDestroy`). Corregido en `c830579`: se quitó ese guard y
+  `syncStarted` + el lanzamiento de la ventana van bajo `logWatcherLock`, que
+  `onDestroy` también toma. Tercera verificación independiente: A5 PASS, A6 PASS,
+  sin ciclos entre `logWatcherLock`/`readGraceLock`/`syncMutex`/monitor de la
+  política. Riesgo aceptado: `startActivity` corre bajo `logWatcherLock`, así que
+  una llamada de Android anormalmente lenta podría retrasar `onDestroy`.
+  Decisión del usuario: push **sin review nativo** del tramo Android.
