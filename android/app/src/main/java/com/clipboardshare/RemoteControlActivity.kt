@@ -34,6 +34,7 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "ClipboardShareRemote"
+        const val TYPED_CARD_VISIBLE_MS = 3_000L
     }
 
     private val client = InputClient()
@@ -239,8 +240,9 @@ class RemoteControlActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    /** Latest words typed, with the one still being typed emphasised. */
+    /** Latest words typed, with the one still being typed emphasised; it hides after a pause. */
     private fun showTypedPhrase(card: TextView, phrase: String) {
+        card.removeCallbacks(hideTypedCard)
         if (phrase.isEmpty()) {
             card.visibility = View.GONE
             return
@@ -255,7 +257,12 @@ class RemoteControlActivity : AppCompatActivity() {
         }
         card.text = text
         card.visibility = View.VISIBLE
+        typedCardView = card
+        card.postDelayed(hideTypedCard, TYPED_CARD_VISIBLE_MS)
     }
+
+    private var typedCardView: View? = null
+    private val hideTypedCard = Runnable { typedCardView?.visibility = View.GONE }
 
     /**
      * With the soft keyboard open the shortcuts and the keyboard button give way,
@@ -273,6 +280,10 @@ class RemoteControlActivity : AppCompatActivity() {
             val visibility = if (open) View.GONE else View.VISIBLE
             if (shortcuts.visibility != visibility) shortcuts.visibility = visibility
             if (keyboardButton.visibility != visibility) keyboardButton.visibility = visibility
+            if (!open) {
+                typedCardView?.removeCallbacks(hideTypedCard)
+                typedCardView?.visibility = View.GONE
+            }
         }
     }
 
