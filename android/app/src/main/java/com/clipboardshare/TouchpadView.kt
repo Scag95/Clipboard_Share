@@ -210,8 +210,8 @@ class TouchpadView @JvmOverloads constructor(
         // Laptop-style scroll hint: a thin line with a chevron at each end.
         val d = resources.displayMetrics.density
         val cx = width - stripPx / 2f
-        val top = height * 0.14f
-        val bottom = height * 0.86f
+        val top = height * 0.06f
+        val bottom = height * 0.94f
         val chev = 5f * d
         railPaint.strokeWidth = 1.5f * d
         canvas.drawLine(cx, top + chev, cx, bottom - chev, railPaint)
