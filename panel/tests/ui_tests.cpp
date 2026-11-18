@@ -53,7 +53,7 @@ class UiTests : public QObject {
         QQuickWindow *window = nullptr;
         Session(const QString &path, std::function<void(FakeServer &)> setup, bool startHidden = false)
             : server(path), backend((setup(server), path), 100), theme(path + ".theme"),
-              autostart(home.filePath("nudge"), home.filePath("xdg"), systemctl.runner()) {
+              autostart(home.filePath("state"), home.filePath("xdg"), systemctl.runner()) {
             engine.rootContext()->setContextProperty("theme", &theme);
             engine.rootContext()->setContextProperty("backend", &backend);
             engine.rootContext()->setContextProperty("autostart", &autostart);
@@ -265,6 +265,20 @@ private slots:
         QVERIFY(s.autostart.serverEnabled());
     }
 
+    // A failed first-run enable stays visible in the Settings card (S10).
+    void aFailedFirstRunEnableIsShownInSettings() {
+        Session s(m_path, [](FakeServer &) {});
+        s.systemctl.enabled = false;
+        s.systemctl.failCode = 1;
+        s.systemctl.failOutput = "Failed to enable unit: boom";
+
+        s.autostart.applyFirstRunDefaults();
+
+        const QString error = "No se pudo activar el inicio del servidor: Failed to enable unit: boom";
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, error) != nullptr, 3000);
+        QVERIFY(!QFileInfo::exists(s.autostart.markerPath()));
+    }
+
     // The app is called Nudge in the window and uses the Nudge icon (S1).
     void theWindowAndIconSayNudge() {
         Session s(m_path, [](FakeServer &) {});
@@ -288,7 +302,7 @@ private slots:
         Backend backend(m_dir.filePath("absent.sock"), 100);
         Theme theme(m_path + ".theme");
         FakeSystemctl systemctl;
-        Autostart autostart(m_dir.filePath("nudge"), m_dir.filePath("xdg"), systemctl.runner());
+        Autostart autostart(m_dir.filePath("state"), m_dir.filePath("xdg"), systemctl.runner());
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("theme", &theme);
         engine.rootContext()->setContextProperty("backend", &backend);

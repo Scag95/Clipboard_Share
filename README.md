@@ -118,10 +118,14 @@ interruptor. Si un cambio falla, la tarjeta muestra el motivo.
 El paquete `nudge` reemplaza a `clipboard-share` (`replaces`/`conflicts`/
 `provides`). Antes de actualizar, apagá el servicio viejo:
 `systemctl --user disable --now clipboard-share`. Al primer arranque, el
-servidor, el CLI o el panel mueven `~/.config/clipboard-share` a
-`~/.config/nudge` (si este último no existe todavía), así los teléfonos
-emparejados siguen funcionando; un `~/.config/nudge` existente nunca se
-sobrescribe.
+**servidor** mueve `~/.config/clipboard-share` a `~/.config/nudge` (si este
+último no existe todavía), así los teléfonos emparejados siguen funcionando;
+un `~/.config/nudge` existente nunca se sobrescribe. El CLI y el panel no
+mueven nada: usan `~/.config/nudge` si existe y, si no, el directorio viejo.
+Si el servidor no puede moverlo, sigue trabajando con el directorio viejo y
+no se pierde ningún emparejamiento. Durante la transición el servidor anuncia
+el servicio mDNS nuevo (`_nudge._tcp`) y el viejo (`_clipboard-share._tcp`), y
+la app de Android busca los dos.
 
 El panel (`nudge-panel`) arranca solo con la sesión, oculto en la
 bandeja; cuando un teléfono pide emparejarse, **la bandeja avisa** (clic en el

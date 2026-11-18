@@ -59,10 +59,12 @@ needed; the old `CLIPBOARD_SHARE_*` variable names still work as a fallback.
 
 ## Upgrading from clipboard-share
 
-The first run of the server, the CLI or the panel moves
-`~/.config/clipboard-share` to `~/.config/nudge` when only the old directory
-exists, so paired phones keep working. An existing `~/.config/nudge` is never
-overwritten. The old unit is removed by the upgrade, so stop and disable it
+The first start of the server moves `~/.config/clipboard-share` to
+`~/.config/nudge` when only the old directory exists, so paired phones keep
+working. An existing `~/.config/nudge` is never overwritten. The CLI and the
+panel never move it: until the server has moved it they use the old directory
+as it is, and they follow it to `~/.config/nudge` afterwards. The panel keeps
+its first-run marker in `~/.local/state/nudge-panel/` (`$XDG_STATE_HOME`). The old unit is removed by the upgrade, so stop and disable it
 first, before `pacman -U`, to leave no running process or dangling link:
 
 ```sh

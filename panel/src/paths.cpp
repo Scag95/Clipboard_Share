@@ -3,20 +3,25 @@
 #include <QDir>
 #include <QFileInfo>
 
-#include <cstdio>
-
 namespace paths {
+
+namespace {
+
+// Anything at the path counts, a dangling symlink too, like the server's
+// Lstat: the server never moves the old directory over it either.
+bool present(const QString &path) {
+    const QFileInfo info(path);
+    return info.exists() || info.isSymLink();
+}
+
+} // namespace
 
 QString configDir() {
     const QString base = QDir::homePath() + "/.config";
     const QString current = base + "/nudge";
     const QString old = base + "/clipboard-share";
-    // exists() follows symlinks, so a dangling link named nudge also blocks
-    // the move: nothing at the new name is ever replaced.
-    if (!QFileInfo::exists(current) && !QFileInfo(current).isSymLink() && QFileInfo(old).isDir()) {
-        if (!QDir().rename(old, current))
-            std::fprintf(stderr, "nudge-panel: cannot move %s to %s\n", qPrintable(old), qPrintable(current));
-    }
+    if (!present(current) && present(old))
+        return old;
     return current;
 }
 
@@ -27,6 +32,14 @@ QString controlSocket() {
             return override;
     }
     return configDir() + "/ctl.sock";
+}
+
+QString panelStateDir() {
+    // The XDG spec ignores a relative value.
+    QString base = qEnvironmentVariable("XDG_STATE_HOME");
+    if (base.isEmpty() || QDir::isRelativePath(base))
+        base = QDir::homePath() + "/.local/state";
+    return base + "/nudge-panel";
 }
 
 } // namespace paths

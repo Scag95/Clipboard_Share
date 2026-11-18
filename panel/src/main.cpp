@@ -24,7 +24,6 @@
 
 #include "autostart.h"
 #include "backend.h"
-#include "paths.h"
 #include "theme.h"
 
 namespace {
@@ -130,9 +129,10 @@ int main(int argc, char *argv[]) {
     QQuickStyle::setStyle("Material");
 
     Theme theme;
-    // Moves the pre-rename config directory before anything reads or writes
-    // under ~/.config/nudge.
-    Autostart autostart(paths::configDir());
+    // The real systemctl runs asynchronously here, so the startup calls never
+    // hold back the window. The panel never moves or creates the server's
+    // config directory; only the server migrates it.
+    Autostart autostart;
     autostart.applyFirstRunDefaults();
     Backend backend;
     // Opening the panel starts the server, whatever the login switch says.

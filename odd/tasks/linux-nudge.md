@@ -10,12 +10,18 @@ Rename the Linux server, panel and Arch package to Nudge with the new icon, and 
 - S6: The Android app discovers the new mDNS type `_nudge._tcp.` (change the constant in MainActivity.kt); everything else about discovery is unchanged.
 - S7: Existing behavior preserved: pairing, approve/deny/revoke, clipboard sync and remote input work as before; Go tests (`go test ./...`) and the panel tests (`panel/bin/test`) pass; the Android build and unit tests pass.
 - S8: Docs updated: README.md and pkgbuild/README.md describe Nudge, the new names, the migration and the two autostart switches.
+- S9: Migration hardening after native review (A1, A2): only the server moves the old config directory (the CLI and the panel never do). Everyone resolves the effective config dir with the same rule: `~/.config/nudge` if it exists, else `~/.config/clipboard-share` if it exists (used as is, no move), else `~/.config/nudge`. If the server's move fails it logs the error and keeps using the old directory; nothing ever creates an empty `~/.config/nudge` before the move. The CLI connects to the socket of the effective dir. If `NUDGE_STATE` or `CLIPBOARD_SHARE_STATE` points into the old directory, the server does not move it.
+- S10: The panel's first-run marker no longer lives in `~/.config/nudge`; it goes under `$XDG_STATE_HOME/nudge-panel/` (default `~/.local/state/nudge-panel/`), and it is written only when enabling the server succeeded, so a failed first run is retried at the next launch.
+- S11: mDNS transition: the server announces both `_nudge._tcp` and the old `_clipboard-share._tcp` for the same instance and port, and Android browses both types, listing a host once by its service name.
 
 ## Tasks
 - T1 (S2, S3, S6, S7) route: worker W1 — Go server/CLI/module renames, `NUDGE_*` env with fallback, config-dir migration, mDNS type, Android constant. Risk: item 1/3 (stored data migration, CLI and config contracts). Own commit. Commit: pending.
 - T2 (S1, S2, S4, S5, S7, S8) route: worker W2 — panel (names, `nudge-panel`, config dir/socket paths, icon SVG, autostart switches, server start on launch), pkgbuild (PKGBUILD, desktop files, unit, udev rules, icon install), READMEs. Commit: pending.
+- T4 (S9, S11) route: worker W3 — Go (pair config resolution and migration, CLI socket resolution, state override guard, dual mDNS announcement) and the Android dual discovery in MainActivity.kt. Risk: item 1/3 again (stored data and discovery contract). Commit: pending.
+- T5 (S9, S10) route: worker W4 — panel (effective config dir without migrating, marker under XDG state, retry on failed enable, surface errors). Commit: pending.
 - T3 verification: build the package with makepkg (no install), run all test suites, run the migration against a temp HOME. Commit: pending.
 
 ## Log
 - L1: Ahora si haz el commit. leugo vamos a preparar el instalador para windows. por cierto, te falta ajustar la app para arch que creamos. aún está con el nombre antiguo y el logo viejo, hay que poner una opción en la app para que se inicie automaticamente, el usuario debe de poder desactivarlo si así lo desea.
 - L2: (answer) Renombrar: "Todo, incluidos nombres internos". Autoinicio: "Que hayan las 2 opciones y que el usuario decida. obvio si se lanza el front, también debe de lanzarse el servidor." Por defecto: "Activado, con interruptor para apagarlo (recomendado)".
+- L3: hazlo en el orden recomendado. (Context: after the native reviews of 18bb3ae and 2e6dcfb the user chose to apply the migration and mDNS hardening first, then publish.)

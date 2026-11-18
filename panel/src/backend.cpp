@@ -18,13 +18,17 @@ constexpr int kExchangeTimeoutMs = 3000;
 } // namespace
 
 Backend::Backend(const QString &socketPath, int pollMs, QObject *parent)
-    : QObject(parent), m_socketPath(socketPath.isEmpty() ? paths::controlSocket() : socketPath) {
+    : QObject(parent), m_fixedSocketPath(socketPath) {
     if (pollMs > 0) {
         m_poll.setInterval(pollMs);
         connect(&m_poll, &QTimer::timeout, this, &Backend::refresh);
         m_poll.start();
         refresh();
     }
+}
+
+QString Backend::socketPath() const {
+    return m_fixedSocketPath.isEmpty() ? paths::controlSocket() : m_fixedSocketPath;
 }
 
 QString Backend::hostName() const {
@@ -58,6 +62,7 @@ void Backend::approveLast() {
 
 void Backend::send(const QJsonObject &command, bool refreshAfter) {
     const bool isList = command.value("cmd").toString() == "list";
+    const QString path = socketPath();
     auto *socket = new QLocalSocket(this);
     auto *timeout = new QTimer(socket);
     timeout->setSingleShot(true);
@@ -75,19 +80,19 @@ void Backend::send(const QJsonObject &command, bool refreshAfter) {
         }
     };
 
-    connect(timeout, &QTimer::timeout, this, [this, socket, finish] {
+    connect(timeout, &QTimer::timeout, this, [this, socket, finish, path] {
         socket->abort();
-        setOffline(tr("The server at %1 did not answer").arg(m_socketPath));
+        setOffline(tr("The server at %1 did not answer").arg(path));
         finish();
     });
     connect(socket, &QLocalSocket::connected, this, [socket, command, timeout] {
         timeout->start();
         socket->write(QJsonDocument(command).toJson(QJsonDocument::Compact) + "\n");
     });
-    connect(socket, &QLocalSocket::errorOccurred, this, [this, socket, finish](QLocalSocket::LocalSocketError) {
+    connect(socket, &QLocalSocket::errorOccurred, this, [this, socket, finish, path](QLocalSocket::LocalSocketError) {
         // The control socket belongs to the server process, so an unreachable
         // socket means the server is not running (or runs under another user).
-        setOffline(tr("Server not running (%1)").arg(m_socketPath));
+        setOffline(tr("Server not running (%1)").arg(path));
         finish();
     });
     connect(socket, &QLocalSocket::readyRead, this, [this, socket, isList, refreshAfter, finish] {
@@ -121,7 +126,7 @@ void Backend::send(const QJsonObject &command, bool refreshAfter) {
                 refresh();
         }
     });
-    socket->connectToServer(m_socketPath);
+    socket->connectToServer(path);
 }
 
 void Backend::applyList(const QJsonObject &response) {
