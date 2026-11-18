@@ -1,6 +1,9 @@
 package com.clipboardshare
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -32,6 +35,11 @@ class TouchpadView @JvmOverloads constructor(
     private val longPressMs = 600L
     private val tapMs = 300L
     private val twoFingerTapMs = 500L
+
+    private val stripPx = 44f * resources.displayMetrics.density
+    private var edgeScroll = false
+    private val stripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF45454D.toInt() }
+    private val stripRect = RectF()
 
     private var primaryId = -1
     private var activeCount = 0
@@ -73,12 +81,14 @@ class TouchpadView @JvmOverloads constructor(
                 consumed = false
                 scrollAccumX = 0f
                 scrollAccumY = 0f
-                postDelayed(longPressRunnable, longPressMs)
+                edgeScroll = EdgeScroll.inStrip(event.x, width, stripPx)
+                if (!edgeScroll) postDelayed(longPressRunnable, longPressMs)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 activeCount = event.pointerCount
                 if (activeCount >= 2) {
+                    edgeScroll = false
                     twoFinger = true
                     gestureWasTwo = true
                     removeCallbacks(longPressRunnable)
@@ -117,6 +127,16 @@ class TouchpadView @JvmOverloads constructor(
                     val dy = y - lastY
                     lastX = x
                     lastY = y
+                    if (edgeScroll) {
+                        // Same direction as the two-finger scroll.
+                        scrollAccumY += dy
+                        val ny = (scrollAccumY / notchPx).toInt()
+                        if (ny != 0) {
+                            listener?.onScroll(0, ny)
+                            scrollAccumY -= ny * notchPx
+                        }
+                        return true
+                    }
                     if (dx != 0f || dy != 0f) {
                         listener?.onMove(dx.toInt(), dy.toInt())
                         // One finger still moving after a two-finger gesture is
@@ -146,7 +166,7 @@ class TouchpadView @JvmOverloads constructor(
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPressRunnable)
                 val dur = System.currentTimeMillis() - downTime
-                if (!consumed) {
+                if (!consumed && !edgeScroll) {
                     when {
                         gestureWasTwo && dur < twoFingerTapMs && twoFingerMove <= slop -> {
                             listener?.onRightTap()
@@ -182,7 +202,17 @@ class TouchpadView @JvmOverloads constructor(
         return floatArrayOf(sx / n, sy / n)
     }
 
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        // A faint rail on the right edge hints at the scroll strip.
+        val barW = 4f * resources.displayMetrics.density
+        val cx = width - stripPx / 2f
+        stripRect.set(cx - barW / 2f, height * 0.2f, cx + barW / 2f, height * 0.8f)
+        canvas.drawRoundRect(stripRect, barW / 2f, barW / 2f, stripPaint)
+    }
+
     private fun resetState() {
+        edgeScroll = false
         activeCount = 0
         twoFinger = false
         totalMove = 0f
