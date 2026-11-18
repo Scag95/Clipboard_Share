@@ -284,6 +284,22 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- The word being typed, so there is feedback without a text field -->
+        <TextView
+            android:id="@+id/typedWord"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:ellipsize="start"
+            android:gravity="center"
+            android:paddingEnd="14dp"
+            android:paddingStart="14dp"
+            android:singleLine="true"
+            android:text="Palabra actual"
+            android:textColor="#A8A8B3"
+            android:textSize="20sp" />
+
         <Button
             android:id="@+id/btnKeyboard"
             android:layout_width="match_parent"

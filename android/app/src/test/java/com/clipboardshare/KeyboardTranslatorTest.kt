@@ -85,4 +85,56 @@ class KeyboardTranslatorTest {
         assertTrue(translator.pressKey("arrowleft"))
         assertEquals(listOf("key:arrowleft"), sent)
     }
+
+    @Test fun currentWordGrowsAsYouType() {
+        translator.commit("hol")
+        translator.commit("a")
+        assertEquals("hola", translator.currentWord)
+    }
+
+    @Test fun spaceStartsANewWord() {
+        translator.commit("hola ")
+        assertEquals("", translator.currentWord)
+        translator.commit("mun")
+        assertEquals("mun", translator.currentWord)
+    }
+
+    @Test fun backspaceShortensTheWordAndStopsAtEmpty() {
+        translator.commit("hola")
+        translator.deleteBefore(1)
+        assertEquals("hol", translator.currentWord)
+        translator.deleteBefore(10)
+        assertEquals("", translator.currentWord)
+    }
+
+    @Test fun enterAndNavigationKeysClearTheWord() {
+        translator.commit("hola")
+        translator.commit("\n")
+        assertEquals("", translator.currentWord)
+        translator.commit("hola")
+        translator.pressKey("arrowleft")
+        assertEquals("", translator.currentWord)
+    }
+
+    @Test fun composingRewriteKeepsTheLatestSpelling() {
+        translator.setComposing("hol")
+        translator.setComposing("hola")
+        translator.setComposing("hole")
+        assertEquals("hole", translator.currentWord)
+    }
+
+    @Test fun anEmojiIsDeletedAsOneCharacter() {
+        translator.commit("a\uD83D\uDE00")
+        translator.deleteBefore(1)
+        assertEquals("a", translator.currentWord)
+    }
+
+    @Test fun listenerIsToldOnlyWhenTheWordChanges() {
+        val seen = mutableListOf<String>()
+        translator.onWordChanged = { seen += it }
+        translator.commit("ab")
+        translator.pressKey("arrowleft")
+        translator.pressKey("arrowleft")
+        assertEquals(listOf("ab", ""), seen)
+    }
 }

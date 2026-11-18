@@ -14,15 +14,31 @@ class KeyboardTranslator(private val sink: Sink) {
 
     private var composing = ""
 
+    /** The word being typed, for on-phone feedback only; the PC owns the real text. */
+    private val word = StringBuilder()
+    val currentWord: String get() = word.toString()
+    var onWordChanged: ((String) -> Unit)? = null
+    private var lastReported = ""
+
+    private fun reportWord() {
+        val now = word.toString()
+        if (now != lastReported) {
+            lastReported = now
+            onWordChanged?.invoke(now)
+        }
+    }
+
     fun commit(text: CharSequence): Boolean {
         val ok = rewriteComposing(text.toString())
         composing = ""
+        reportWord()
         return ok
     }
 
     fun setComposing(text: CharSequence): Boolean {
         val ok = rewriteComposing(text.toString())
         composing = text.toString()
+        reportWord()
         return ok
     }
 
@@ -33,11 +49,15 @@ class KeyboardTranslator(private val sink: Sink) {
     fun deleteBefore(count: Int): Boolean {
         composing = ""
         if (count <= 0 || count > MAX_BACKSPACES) return false
-        return repeatBackspace(count)
+        val ok = repeatBackspace(count)
+        reportWord()
+        return ok
     }
 
     fun pressKey(name: String): Boolean {
         composing = ""
+        word.setLength(0)
+        reportWord()
         return sink.key(name)
     }
 
@@ -56,7 +76,10 @@ class KeyboardTranslator(private val sink: Sink) {
 
     private fun repeatBackspace(n: Int): Boolean {
         var ok = true
-        repeat(n) { ok = sink.key("backspace") && ok }
+        repeat(n) {
+            ok = sink.key("backspace") && ok
+            if (word.isNotEmpty()) word.setLength(word.offsetByCodePoints(word.length, -1))
+        }
         return ok
     }
 
@@ -70,9 +93,12 @@ class KeyboardTranslator(private val sink: Sink) {
         }
         for (ch in text) {
             when {
-                ch == '\n' -> { flush(); ok = sink.key("enter") && ok }
+                ch == '\n' -> { flush(); word.setLength(0); ok = sink.key("enter") && ok }
                 ch.code < 0x20 || ch.code == 0x7f -> Unit
-                else -> run.append(ch)
+                else -> {
+                    run.append(ch)
+                    if (Character.isWhitespace(ch)) word.setLength(0) else word.append(ch)
+                }
             }
         }
         flush()

@@ -26,6 +26,11 @@ class RemoteKeyboardView @JvmOverloads constructor(
         override fun key(name: String): Boolean = sink?.key(name) ?: false
     })
 
+    /** Called with the word being typed (empty when none), on the main thread. */
+    var onWordChanged: ((String) -> Unit)?
+        get() = translator.onWordChanged
+        set(value) { translator.onWordChanged = value }
+
     init {
         isFocusable = true
         isFocusableInTouchMode = true

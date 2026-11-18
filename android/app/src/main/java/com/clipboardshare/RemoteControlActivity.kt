@@ -3,6 +3,7 @@ package com.clipboardshare
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -141,6 +142,11 @@ class RemoteControlActivity : AppCompatActivity() {
         keyboard.sink = object : KeyboardTranslator.Sink {
             override fun text(chars: String) = sendOrWarn(client.sendText(chars))
             override fun key(name: String) = sendOrWarn(client.sendKey(name))
+        }
+        val typedWord = findViewById<TextView>(R.id.typedWord)
+        keyboard.onWordChanged = { word ->
+            typedWord.text = word.ifEmpty { "Palabra actual" }
+            typedWord.setTextColor(if (word.isEmpty()) Color.rgb(168, 168, 179) else Color.rgb(245, 245, 247))
         }
         findViewById<Button>(R.id.btnKeyboard).setOnClickListener { keyboard.show() }
         connectButton = findViewById(R.id.btnConnect)
