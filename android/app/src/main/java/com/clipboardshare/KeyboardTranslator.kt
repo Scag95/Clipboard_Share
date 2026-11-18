@@ -61,6 +61,14 @@ class KeyboardTranslator(private val sink: Sink) {
         return ok
     }
 
+    /** Forgets what the readout remembers; nothing is sent to the PC. */
+    fun resetTyping() {
+        composing = ""
+        word.setLength(0)
+        phrase.setLength(0)
+        reportWord()
+    }
+
     fun finishComposing() {
         composing = ""
     }

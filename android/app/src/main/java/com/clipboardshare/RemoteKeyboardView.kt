@@ -36,6 +36,9 @@ class RemoteKeyboardView @JvmOverloads constructor(
         get() = translator.onPhraseChanged
         set(value) { translator.onPhraseChanged = value }
 
+    /** Clears the remembered word and phrase, e.g. when the readout is dismissed. */
+    fun resetTyping() = translator.resetTyping()
+
     init {
         isFocusable = true
         isFocusableInTouchMode = true

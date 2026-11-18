@@ -262,7 +262,11 @@ class RemoteControlActivity : AppCompatActivity() {
     }
 
     private var typedCardView: View? = null
-    private val hideTypedCard = Runnable { typedCardView?.visibility = View.GONE }
+    /** Dismissing the card also forgets the phrase, so the next one starts empty. */
+    private val hideTypedCard = Runnable {
+        typedCardView?.visibility = View.GONE
+        keyboard.resetTyping()
+    }
 
     /**
      * With the soft keyboard open the shortcuts and the keyboard button give way,
@@ -280,9 +284,9 @@ class RemoteControlActivity : AppCompatActivity() {
             val visibility = if (open) View.GONE else View.VISIBLE
             if (shortcuts.visibility != visibility) shortcuts.visibility = visibility
             if (keyboardButton.visibility != visibility) keyboardButton.visibility = visibility
-            if (!open) {
+            if (!open && typedCardView?.visibility == View.VISIBLE) {
                 typedCardView?.removeCallbacks(hideTypedCard)
-                typedCardView?.visibility = View.GONE
+                hideTypedCard.run()
             }
         }
     }

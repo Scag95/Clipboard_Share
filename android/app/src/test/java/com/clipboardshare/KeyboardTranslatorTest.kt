@@ -179,4 +179,24 @@ class KeyboardTranslatorTest {
         translator.pressKey("arrowleft")
         assertEquals(listOf("a b", "a ", ""), seen)
     }
+
+    @Test fun resetTypingForgetsThePhraseAndTheWordWithoutTouchingThePc() {
+        translator.commit("hola mundo")
+        sent.clear()
+        translator.resetTyping()
+        assertEquals("", translator.currentPhrase)
+        assertEquals("", translator.currentWord)
+        assertTrue(sent.isEmpty())
+        translator.commit("x")
+        assertEquals("x", translator.currentPhrase)
+    }
+
+    @Test fun resetTypingTellsTheListenersAndIsSilentWhenAlreadyEmpty() {
+        val phrases = mutableListOf<String>()
+        translator.onPhraseChanged = { phrases += it }
+        translator.commit("ab")
+        translator.resetTyping()
+        translator.resetTyping()
+        assertEquals(listOf("ab", ""), phrases)
+    }
 }
