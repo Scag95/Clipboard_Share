@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "comments": [
+    {
+      "id": "krpp63nr",
+      "file": "04-thumb-zone-v2.html",
+      "selector": "body > main > div:nth-of-type(3) > button:nth-of-type(3)",
+      "excerpt": "Derecho clic",
+      "comment": "Ambos click pasalos debajo del trackpad, integralos dentro del mismo cuadro, puedes quitar los textos.",
+      "createdAt": "2026-11-18T17:04:04.385Z",
+      "status": "resolved",
+      "sentAt": "2026-11-18T17:04:04.411Z",
+      "resolvedAt": "2026-11-18T17:04:16.222Z",
+      "resolution": "Los dos clics ahora forman una franja sin texto dentro del cuadro del touchpad; abajo queda solo el botón Teclado."
+    }
+  ]
+}

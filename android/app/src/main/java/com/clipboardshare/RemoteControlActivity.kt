@@ -10,7 +10,6 @@ import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
-import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -42,7 +41,10 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var clipboardStatusText: TextView
-    private lateinit var textInput: EditText
+    private lateinit var keyboard: RemoteKeyboardView
+    private lateinit var statusBadge: Button
+    private lateinit var statusDot: View
+    private lateinit var connPanel: View
     private lateinit var connectButton: Button
     private lateinit var cancelPairingButton: Button
     private var retryScheduled = false
@@ -53,7 +55,10 @@ class RemoteControlActivity : AppCompatActivity() {
     private val clipboardStatusPoller = object : Runnable {
         override fun run() {
             if (::clipboardStatusText.isInitialized) {
-                clipboardStatusText.text = ClipboardSyncService.clipboardStatus
+                val clip = ClipboardSyncService.clipboardStatus
+                clipboardStatusText.text = clip
+                statusBadge.text = "⎘ $clip ▾"
+                statusDot.alpha = if (client.connected) 1f else 0.35f
             }
             clipboardStatusHandler.postDelayed(this, 500L)
         }
@@ -116,7 +121,28 @@ class RemoteControlActivity : AppCompatActivity() {
         setContentView(R.layout.activity_remote_control)
         statusText = findViewById(R.id.rcStatus)
         clipboardStatusText = findViewById(R.id.clipboardStatus)
-        textInput = findViewById(R.id.etText)
+        statusBadge = findViewById(R.id.btnStatusBadge)
+        statusDot = findViewById(R.id.rcDot)
+        connPanel = findViewById(R.id.connPanel)
+        findViewById<TextView>(R.id.rcHost).text =
+            store.getLastHosts().firstOrNull { SessionStore.hostKey(it.host, it.port) == hostKey }?.name
+                ?: hostKey
+        statusBadge.setOnClickListener {
+            connPanel.visibility = if (connPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        val moreShortcuts = findViewById<View>(R.id.moreShortcuts)
+        val moreButton = findViewById<Button>(R.id.btnMoreShortcuts)
+        moreButton.setOnClickListener {
+            val open = moreShortcuts.visibility != View.VISIBLE
+            moreShortcuts.visibility = if (open) View.VISIBLE else View.GONE
+            moreButton.text = if (open) "▾" else "▴"
+        }
+        keyboard = findViewById(R.id.remoteKeyboard)
+        keyboard.sink = object : KeyboardTranslator.Sink {
+            override fun text(chars: String) = sendOrWarn(client.sendText(chars))
+            override fun key(name: String) = sendOrWarn(client.sendKey(name))
+        }
+        findViewById<Button>(R.id.btnKeyboard).setOnClickListener { keyboard.show() }
         connectButton = findViewById(R.id.btnConnect)
         cancelPairingButton = findViewById(R.id.btnCancelPairing)
 
@@ -143,29 +169,17 @@ class RemoteControlActivity : AppCompatActivity() {
         bind(R.id.btnCtrlZ) { client.sendKey("z", listOf("ctrl")) }
         bind(R.id.btnEsc) { client.sendKey("esc") }
         bind(R.id.btnEnter) { client.sendKey("enter") }
+        bind(R.id.btnTab) { client.sendKey("tab") }
+        bind(R.id.btnDelete) { client.sendKey("delete") }
         bind(R.id.btnArrowLeft) { client.sendKey("arrowleft") }
         bind(R.id.btnArrowRight) { client.sendKey("arrowright") }
         bind(R.id.btnArrowUp) { client.sendKey("arrowup") }
         bind(R.id.btnArrowDown) { client.sendKey("arrowdown") }
 
-        bind(R.id.btnSendText) {
-            val chars = textInput.text.toString()
-            when {
-                chars.isEmpty() -> setStatus("Nada que enviar")
-                !client.sendText(chars) -> setStatus(
-                    if (client.connected) {
-                        "Texto demasiado largo o con caracteres de control: no se envió"
-                    } else {
-                        "Sin conexión: el texto no se envió"
-                    }
-                )
-                else -> textInput.setText("")
-            }
-        }
-
         connectButton.setOnClickListener { requestPairing(automatic = false) }
         cancelPairingButton.setOnClickListener { cancelPairing() }
         bind(R.id.btnDisconnect) {
+            connPanel.visibility = View.GONE
             manualDisconnect = true
             pairingJob?.cancel()
             pairingJob = null
@@ -214,6 +228,11 @@ class RemoteControlActivity : AppCompatActivity() {
         clipboardStatusHandler.removeCallbacksAndMessages(null)
         client.disconnect()
         super.onDestroy()
+    }
+
+    private fun sendOrWarn(sent: Boolean): Boolean {
+        if (!sent) setStatus(if (client.connected) "No se pudo enviar la tecla" else "Sin conexión: la tecla no se envió")
+        return sent
     }
 
     private fun bind(id: Int, action: () -> Unit) {

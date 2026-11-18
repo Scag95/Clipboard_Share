@@ -1,0 +1,10 @@
+{
+  "title": "Pantalla de control remoto",
+  "brief": "Rediseño de la pantalla de control remoto de Clipboard Share (touchpad, clics, atajos, teclado del celular, portapapeles) para celular, manteniendo el tema oscuro y el acento teal actual",
+  "artboards": [
+    { "file": "01-touchpad-first.html", "title": "Touchpad primero", "tradeoff": "El touchpad ocupa casi toda la pantalla; atajos y ajustes quedan en una hoja inferior (un toque extra)", "width": 412, "height": 892 },
+    { "file": "02-tabs.html", "title": "Pestañas por tarea", "tradeoff": "Cada tarea tiene su espacio y no hay desorden; cambiar entre mouse y teclado cuesta un toque", "width": 412, "height": 892 },
+    { "file": "03-thumb-zone.html", "title": "Zona del pulgar", "tradeoff": "Todo a la vista y al alcance del pulgar; menos espacio de touchpad y atajos en carrusel con scroll horizontal", "width": 412, "height": 892 },
+    { "file": "04-thumb-zone-v2.html", "title": "Zona del pulgar v2", "tradeoff": "Atajos frecuentes siempre visibles y el resto en un panel expandible; estado y portapapeles tras una insignia (un toque para ver detalles)", "width": 412, "height": 892 }
+  ]
+}
