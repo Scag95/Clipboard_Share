@@ -269,21 +269,30 @@ class RemoteControlActivity : AppCompatActivity() {
     }
 
     /**
-     * With the soft keyboard open the shortcuts and the keyboard button give way,
-     * so the touchpad keeps its room and the readout floats just above the keys.
+     * With the soft keyboard open only the keyboard button gives way; the shortcuts
+     * stay usable and the readout floats above them, just over the keys.
      */
     private fun watchSoftKeyboard() {
         val root = findViewById<View>(android.R.id.content)
         val shortcuts = findViewById<View>(R.id.shortcutsPanel)
         val keyboardButton = findViewById<View>(R.id.btnKeyboard)
+        val card = findViewById<View>(R.id.typedCard)
+        val screenPadding = (14 * resources.displayMetrics.density).toInt()
+        val gap = (8 * resources.displayMetrics.density).toInt()
         root.viewTreeObserver.addOnGlobalLayoutListener {
             val frame = android.graphics.Rect()
             root.getWindowVisibleDisplayFrame(frame)
             val hidden = root.rootView.height - frame.bottom
             val open = hidden > root.rootView.height * 0.15f
             val visibility = if (open) View.GONE else View.VISIBLE
-            if (shortcuts.visibility != visibility) shortcuts.visibility = visibility
             if (keyboardButton.visibility != visibility) keyboardButton.visibility = visibility
+            // The card clears the shortcuts panel that sits above the keys.
+            val margin = if (open) screenPadding + shortcuts.height + gap + gap else screenPadding
+            val params = card.layoutParams as android.widget.FrameLayout.LayoutParams
+            if (params.bottomMargin != margin) {
+                params.bottomMargin = margin
+                card.layoutParams = params
+            }
             if (!open && typedCardView?.visibility == View.VISIBLE) {
                 typedCardView?.removeCallbacks(hideTypedCard)
                 hideTypedCard.run()
