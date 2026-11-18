@@ -1,5 +1,5 @@
-// clipboard-share-panel - approve phones and manage paired devices for the
-// Clipboard Share server, from a window and a tray icon.
+// nudge-panel - approve phones and manage paired devices for the Nudge
+// server, from a window and a tray icon.
 
 #include <QCommandLineParser>
 #include <QDir>
@@ -22,7 +22,9 @@
 #include <csignal>
 #include <cstdio>
 
+#include "autostart.h"
 #include "backend.h"
+#include "paths.h"
 #include "theme.h"
 
 namespace {
@@ -64,16 +66,16 @@ bool lockHolderAlive(qint64 pid, const QString &host) {
 
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
-    app.setApplicationName("clipboard-share-panel");
+    app.setApplicationName("nudge-panel");
     app.setApplicationVersion("0.1.0");
 
-    // Matches the window to clipboard-share.desktop, so the compositor (Wayland
-    // app_id) and the launcher pick up the installed icon.
-    app.setDesktopFileName("clipboard-share");
-    app.setWindowIcon(QIcon::fromTheme("clipboard-share", QIcon(":/clipboard-share.svg")));
+    // Matches the window to nudge.desktop, so the compositor (Wayland app_id)
+    // and the launcher pick up the installed icon.
+    app.setDesktopFileName("nudge");
+    app.setWindowIcon(QIcon::fromTheme("nudge", QIcon(":/nudge.svg")));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription("Approve phones and manage paired devices for Clipboard Share.");
+    parser.setApplicationDescription("Nudge: approve phones, manage paired devices and choose what starts at login.");
     parser.addHelpOption();
     parser.addVersionOption();
     QCommandLineOption background("background", "Start hidden in the tray (for autostart).");
@@ -82,8 +84,8 @@ int main(int argc, char *argv[]) {
 
     // One panel per session: a second launch only raises the first.
     const QString runtime = runtimeDirectory();
-    const QString activationPath = runtime + "/clipboard-share-panel.socket";
-    QLockFile lock(runtime + "/clipboard-share-panel.lock");
+    const QString activationPath = runtime + "/nudge-panel.socket";
+    QLockFile lock(runtime + "/nudge-panel.lock");
     lock.setStaleLockTime(0);
     if (!lock.tryLock(0)) {
         if (activateRunningInstance(activationPath))
@@ -93,13 +95,13 @@ int main(int argc, char *argv[]) {
         qint64 pid = 0;
         QString host, owner;
         if (lock.getLockInfo(&pid, &host, &owner) && lockHolderAlive(pid, host)) {
-            std::fprintf(stderr, "clipboard-share-panel: another panel (pid %lld) holds %s but does not answer\n",
+            std::fprintf(stderr, "nudge-panel: another panel (pid %lld) holds %s but does not answer\n",
                          static_cast<long long>(pid), qPrintable(lock.fileName()));
             return 1;
         }
         lock.removeStaleLockFile();
         if (!lock.tryLock(0)) {
-            std::fprintf(stderr, "clipboard-share-panel: cannot take the lock %s\n", qPrintable(lock.fileName()));
+            std::fprintf(stderr, "nudge-panel: cannot take the lock %s\n", qPrintable(lock.fileName()));
             return 1;
         }
     }
@@ -122,17 +124,24 @@ int main(int argc, char *argv[]) {
     });
     QLocalServer::removeServer(activationPath);
     if (!activation.listen(activationPath))
-        std::fprintf(stderr, "clipboard-share-panel: cannot listen on %s (%s); a second launch will not raise this one\n",
+        std::fprintf(stderr, "nudge-panel: cannot listen on %s (%s); a second launch will not raise this one\n",
                      qPrintable(activationPath), qPrintable(activation.errorString()));
 
     QQuickStyle::setStyle("Material");
 
     Theme theme;
+    // Moves the pre-rename config directory before anything reads or writes
+    // under ~/.config/nudge.
+    Autostart autostart(paths::configDir());
+    autostart.applyFirstRunDefaults();
     Backend backend;
+    // Opening the panel starts the server, whatever the login switch says.
+    autostart.startServerWhenOffline(&backend);
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("autostart", &autostart);
     engine.rootContext()->setContextProperty("startHidden", parser.isSet(background));
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())

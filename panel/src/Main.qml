@@ -12,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 380
     minimumHeight: 440
     visible: !startHidden
-    title: "Clipboard Share"
+    title: "Nudge"
     color: "#14161a"
 
     Material.theme: Material.Dark
@@ -52,10 +52,10 @@ ApplicationWindow {
     Platform.SystemTrayIcon {
         id: tray
         visible: true
-        icon.source: "qrc:/clipboard-share.svg"
+        icon.source: "qrc:/nudge.svg"
         tooltip: backend.requests.length > 0
-                 ? qsTr("Clipboard Share - %n pairing request(s)", "", backend.requests.length)
-                 : qsTr("Clipboard Share")
+                 ? qsTr("Nudge - %n pairing request(s)", "", backend.requests.length)
+                 : qsTr("Nudge")
         menu: Platform.Menu {
             Platform.MenuItem { text: qsTr("Open"); onTriggered: window.showPanel() }
             Platform.MenuSeparator {}
@@ -158,7 +158,7 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 color: "#9aa0a6"
                 font.pixelSize: 12
-                text: qsTr("Start it with: systemctl --user start clipboard-share")
+                text: qsTr("Start it with: systemctl --user start nudge")
             }
         }
 
@@ -183,7 +183,7 @@ ApplicationWindow {
                     wrapMode: Text.Wrap
                     color: "#9aa0a6"
                     text: backend.online
-                          ? qsTr("No requests. Open Clipboard Share on your phone and pick this computer.")
+                          ? qsTr("No requests. Open Nudge on your phone and pick this computer.")
                           : ""
                 }
 
@@ -253,6 +253,59 @@ ApplicationWindow {
                                 }
                             }
                         }
+                    }
+                }
+
+                Section { text: qsTr("AJUSTES") }
+
+                // Two independent choices. A failed toggle springs back to the
+                // real state and says why.
+                Card {
+                    objectName: "settingsCard"
+                    Switch {
+                        id: serverSwitch
+                        objectName: "serverAutostartSwitch"
+                        Layout.fillWidth: true
+                        text: "Iniciar el servidor al iniciar sesión"
+                        checked: autostart.serverEnabled
+                        onToggled: {
+                            autostart.setServerEnabled(checked)
+                            checked = Qt.binding(function() { return autostart.serverEnabled })
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: "#9aa0a6"
+                        font.pixelSize: 12
+                        text: "El servidor comparte el portapapeles y recibe el mouse y el teclado del teléfono. Al abrir el panel se inicia igual."
+                    }
+                    Switch {
+                        id: panelSwitch
+                        objectName: "panelAutostartSwitch"
+                        Layout.fillWidth: true
+                        text: "Abrir el panel al iniciar sesión"
+                        checked: autostart.panelEnabled
+                        onToggled: {
+                            autostart.setPanelEnabled(checked)
+                            checked = Qt.binding(function() { return autostart.panelEnabled })
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: "#9aa0a6"
+                        font.pixelSize: 12
+                        text: "El panel arranca oculto en la bandeja y avisa cuando un teléfono pide emparejarse."
+                    }
+                    Label {
+                        objectName: "autostartError"
+                        visible: autostart.error !== ""
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        color: "#ffb4ab"
+                        text: autostart.error
                     }
                 }
             }

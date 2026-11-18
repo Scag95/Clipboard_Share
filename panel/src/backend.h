@@ -11,7 +11,7 @@ class QJsonObject;
 // The panel's client of the server's pairing control socket: a Unix socket that
 // takes one JSON command per line and answers one JSON line. The server never
 // pushes, so the panel polls `list`. Each exchange uses its own short-lived
-// connection, like `clipboard-share pair` does, so a dead server never leaves a
+// connection, like `nudge pair` does, so a dead server never leaves a
 // half-open socket behind.
 class Backend : public QObject {
     Q_OBJECT

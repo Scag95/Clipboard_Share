@@ -7,21 +7,18 @@
 #include <QJsonObject>
 #include <QLocalSocket>
 
+#include "paths.h"
+
 namespace {
 
 // A server that accepts the connection but never answers must not freeze the
 // panel's polling.
 constexpr int kExchangeTimeoutMs = 3000;
 
-QString defaultSocketPath() {
-    const QString override = qEnvironmentVariable("CLIPBOARD_SHARE_CTL_SOCK");
-    return override.isEmpty() ? QDir::homePath() + "/.config/clipboard-share/ctl.sock" : override;
-}
-
 } // namespace
 
 Backend::Backend(const QString &socketPath, int pollMs, QObject *parent)
-    : QObject(parent), m_socketPath(socketPath.isEmpty() ? defaultSocketPath() : socketPath) {
+    : QObject(parent), m_socketPath(socketPath.isEmpty() ? paths::controlSocket() : socketPath) {
     if (pollMs > 0) {
         m_poll.setInterval(pollMs);
         connect(&m_poll, &QTimer::timeout, this, &Backend::refresh);
