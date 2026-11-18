@@ -181,6 +181,8 @@ func saveDevices(path string, devices map[string]device) error {
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
+	// On Windows Chmod only toggles the read-only attribute (0600 keeps the
+	// file writable); access control comes from the per-user %APPDATA% ACL.
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return fmt.Errorf("secure pairing state temporary file: %w", err)
@@ -194,7 +196,7 @@ func saveDevices(path string, devices map[string]device) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close pairing state: %w", err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceFile(tmpName, path); err != nil {
 		return fmt.Errorf("replace pairing state: %w", err)
 	}
 	return nil
@@ -484,15 +486,29 @@ type controlResponse struct {
 	Devices  []DeviceInfo  `json:"devices"`
 }
 
+// isSocketLike reports whether an existing control path may be a (stale)
+// socket we are allowed to replace. On Windows an AF_UNIX socket file is a
+// reparse point that Go reports as ModeSocket; ModeIrregular (unknown reparse
+// tag) is accepted too so a stale socket never blocks startup there.
+func isSocketLike(goos string, mode os.FileMode) bool {
+	if mode&os.ModeSocket != 0 {
+		return true
+	}
+	return goos == "windows" && mode.Type() == os.ModeIrregular
+}
+
 // ListenControl removes a stale socket and starts serving ControlPath. An
 // active socket is never removed. Close unlinks the socket created here.
+// Windows 10 1803+ supports AF_UNIX; there os.Chmod is not meaningful for a
+// socket (the per-user %APPDATA% ACL protects it), so a chmod failure is
+// ignored on Windows and fatal elsewhere.
 func ListenControl(b *Broker) (*ControlServer, error) {
 	path := ControlPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create control socket directory: %w", err)
 	}
 	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
+		if !isSocketLike(hostOS, info.Mode()) {
 			return nil, fmt.Errorf("control path exists and is not a socket: %s", path)
 		}
 		conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
@@ -508,13 +524,14 @@ func ListenControl(b *Broker) (*ControlServer, error) {
 	}
 	listener, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, fmt.Errorf("listen on control socket: %w", err)
+		return nil, fmt.Errorf("listen on control socket %s: %w", path, err)
 	}
 	if unixListener, ok := listener.(*net.UnixListener); ok {
 		unixListener.SetUnlinkOnClose(false)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := chmodPath(path, 0o600); err != nil && hostOS != "windows" {
 		listener.Close()
+		_ = os.Remove(path)
 		return nil, fmt.Errorf("secure control socket: %w", err)
 	}
 	server := &ControlServer{listener: listener, path: path, done: make(chan struct{})}

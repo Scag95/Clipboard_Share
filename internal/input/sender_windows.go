@@ -34,32 +34,34 @@ var (
 	procSendInput = user32.NewProc("SendInput")
 )
 
-// rawMouse mirrors the INPUT struct with the MOUSEINPUT union member
-// (40 bytes on 64-bit Windows).
+// rawMouse mirrors the INPUT struct with the MOUSEINPUT union member on
+// 64-bit Windows: type at 0, the union at 8, sizeof(INPUT) == 40. The
+// explicit padding assumes an 8-byte uintptr (amd64/arm64); the layout is
+// pinned by sender_windows_test.go.
 type rawMouse struct {
 	Type      uint32
-	_         uint32
+	_         uint32 // union is 8-byte aligned
 	Dx        int32
 	Dy        int32
 	MouseData uint32
 	Flags     uint32
-	Time      uint16
-	_         [6]byte
+	Time      uint32 // DWORD
+	_         uint32 // ULONG_PTR alignment
 	Extra     uintptr
 }
 
 // rawKey mirrors the INPUT struct with the KEYBDINPUT union member, padded to
-// the same total size as rawMouse.
+// sizeof(INPUT) (the MOUSEINPUT member is the largest of the union).
 type rawKey struct {
 	Type  uint32
-	_     uint32
+	_     uint32 // union is 8-byte aligned
 	Vk    uint16
 	Scan  uint16
 	Flags uint32
-	Time  uint16
-	_     [6]byte
+	Time  uint32 // DWORD
+	_     uint32 // ULONG_PTR alignment
 	Extra uintptr
-	_     [8]byte
+	_     [8]byte // pad the union to sizeof(MOUSEINPUT)
 }
 
 // Sender injects events into the Windows session via user32!SendInput using
@@ -199,7 +201,16 @@ func (s *Sender) Key(key string, mods []string) error {
 		return fmt.Errorf("unknown key %q", key)
 	}
 	ext := IsExtended(key)
-	modsVK := normalizeMods(mods)
+	modsVK := make([]uint16, 0, len(mods))
+	for _, mod := range mods {
+		m := ModVK(mod)
+		if m == 0 {
+			// Same rule as Linux: never inject the key without a requested
+			// modifier (Ctrl+V instead of Ctrl+Shift+V).
+			return fmt.Errorf("unknown modifier %q", mod)
+		}
+		modsVK = append(modsVK, m)
+	}
 
 	items := make([]rawKey, 0, 2+2*len(modsVK))
 	for _, m := range modsVK {

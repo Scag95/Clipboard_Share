@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -22,7 +23,34 @@ func EnvOverride(suffix string) string {
 	return os.Getenv("CLIPBOARD_SHARE_" + suffix)
 }
 
+// Platform seams; tests replace them to exercise the Windows rules on Linux.
+var (
+	hostOS        = runtime.GOOS
+	userConfigDir = os.UserConfigDir
+	chmodPath     = os.Chmod
+)
+
+// legacyConfigSupported reports whether the pre-rename clipboard-share
+// directory is honoured (fallback and migration). It only ever existed on
+// Linux, so Windows never looks for it.
+func legacyConfigSupported() bool {
+	return hostOS == "linux"
+}
+
+// userConfigRoot is ~/.config on Linux (and other Unix systems), and
+// %APPDATA% (os.UserConfigDir) on Windows, falling back to
+// <home>\AppData\Roaming when APPDATA is unset.
 func userConfigRoot() string {
+	if hostOS == "windows" {
+		if dir, err := userConfigDir(); err == nil && dir != "" {
+			return dir
+		}
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return "."
+		}
+		return filepath.Join(home, "AppData", "Roaming")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
@@ -30,7 +58,8 @@ func userConfigRoot() string {
 	return filepath.Join(home, ".config")
 }
 
-// ConfigDir returns the new per-user state directory, ~/.config/nudge.
+// ConfigDir returns the new per-user state directory: ~/.config/nudge on
+// Linux, %APPDATA%\nudge on Windows.
 // Use EffectiveConfigDir to find where state lives right now.
 func ConfigDir() string {
 	return filepath.Join(userConfigRoot(), configDirName)
@@ -48,6 +77,9 @@ func LegacyConfigDir() string {
 // or moves anything; only the server migrates, via MigrateLegacyConfig.
 func EffectiveConfigDir() string {
 	newDir := ConfigDir()
+	if !legacyConfigSupported() {
+		return newDir
+	}
 	if _, err := os.Lstat(newDir); err == nil {
 		return newDir
 	}
@@ -129,6 +161,9 @@ func isWithin(path, dir string) bool {
 // callers should log the error and continue with EffectiveConfigDir, which
 // then still resolves to the old directory.
 func MigrateLegacyConfig() (moved bool, err error) {
+	if !legacyConfigSupported() {
+		return false, nil
+	}
 	oldDir, newDir := LegacyConfigDir(), ConfigDir()
 	if _, err := os.Lstat(newDir); err == nil {
 		return false, nil

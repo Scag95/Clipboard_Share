@@ -10,8 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -80,6 +80,7 @@ func pairNotification(deviceName string) (title, body string) {
 }
 
 func runServer() {
+	setupLogging()
 	migrateConfig(log.Printf)
 	log.Printf("config dir: %s", pair.EffectiveConfigDir())
 	port := serverPort()
@@ -102,22 +103,22 @@ func runServer() {
 
 	control, err := pair.ListenControl(pairer)
 	if err != nil {
-		log.Fatalf("pairing control socket failed: %v", err)
-	}
-	defer func() {
-		if err := control.Close(); err != nil {
-			log.Printf("closing pairing control socket failed: %v", err)
+		if controlFailureFatal(runtime.GOOS) {
+			log.Fatalf("pairing control socket failed: %v", err)
 		}
-	}()
-
-	pairer.OnRequest(func(req pair.RequestInfo) {
-		// Notification is deliberately best-effort: headless systems and
-		// sessions without DISPLAY still approve through the CLI.
-		title, body := pairNotification(req.Name)
-		go func() {
-			_ = exec.Command("notify-send", title, body).Run()
+		log.Printf("warning: pairing control socket failed, `nudge pair` is unavailable; approve phones from the dialog: %v", err)
+	} else {
+		log.Printf("pairing control socket: %s", pair.ControlPath())
+		defer func() {
+			if err := control.Close(); err != nil {
+				log.Printf("closing pairing control socket failed: %v", err)
+			}
 		}()
-	})
+	}
+
+	// Linux: best-effort notify-send. Windows: an in-process Yes/No dialog
+	// that calls the broker directly, so it works without the socket.
+	pairer.OnRequest(pairRequestHandler(pairer, log.Printf))
 
 	r := api.NewRouter(clipboardStore{})
 	api.AttachPairing(r, pairer)
@@ -132,8 +133,10 @@ func runServer() {
 		}
 	}()
 	log.Printf("Nudge server listening on %s", addr)
-	log.Printf("pairing control socket: %s", pair.ControlPath())
 
+	// On Windows SIGINT is Ctrl+C/Ctrl+Break and SIGTERM is console close,
+	// logoff or shutdown; a windowsgui process gets neither and is simply
+	// terminated, which is fine (state is saved on every change).
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	select {
