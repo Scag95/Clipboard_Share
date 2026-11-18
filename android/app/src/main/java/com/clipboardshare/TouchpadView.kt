@@ -3,7 +3,6 @@ package com.clipboardshare
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -38,10 +37,12 @@ class TouchpadView @JvmOverloads constructor(
 
     private val stripPx = 52.8f * resources.displayMetrics.density
     private var edgeScroll = false
-    private val stripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF45454D.toInt() }
-    private val panelPaint = Paint().apply { color = 0x1AFFFFFF }
-    private val dividerPaint = Paint().apply { color = 0xFF45454D.toInt() }
-    private val stripRect = RectF()
+    private val railPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF8A8A96.toInt()
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
 
     private var primaryId = -1
     private var activeCount = 0
@@ -206,15 +207,18 @@ class TouchpadView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // The scroll strip fills the full height: a faint panel, a divider and a rail.
-        val density = resources.displayMetrics.density
-        val left = width - stripPx
-        canvas.drawRect(left, 0f, width.toFloat(), height.toFloat(), panelPaint)
-        canvas.drawRect(left, 0f, left + density, height.toFloat(), dividerPaint)
-        val barW = 4f * density
+        // Laptop-style scroll hint: a thin line with a chevron at each end.
+        val d = resources.displayMetrics.density
         val cx = width - stripPx / 2f
-        stripRect.set(cx - barW / 2f, height * 0.1f, cx + barW / 2f, height * 0.9f)
-        canvas.drawRoundRect(stripRect, barW / 2f, barW / 2f, stripPaint)
+        val top = height * 0.14f
+        val bottom = height * 0.86f
+        val chev = 5f * d
+        railPaint.strokeWidth = 1.5f * d
+        canvas.drawLine(cx, top + chev, cx, bottom - chev, railPaint)
+        canvas.drawLine(cx - chev, top + chev * 0.5f, cx, top - chev * 0.5f, railPaint)
+        canvas.drawLine(cx, top - chev * 0.5f, cx + chev, top + chev * 0.5f, railPaint)
+        canvas.drawLine(cx - chev, bottom - chev * 0.5f, cx, bottom + chev * 0.5f, railPaint)
+        canvas.drawLine(cx, bottom + chev * 0.5f, cx + chev, bottom - chev * 0.5f, railPaint)
     }
 
     private fun resetState() {
