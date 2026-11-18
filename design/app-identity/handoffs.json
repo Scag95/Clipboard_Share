@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "chosen": "04-nudge-empuje.html",
+  "handoffs": {
+    "04-nudge-empuje.html": {
+      "status": "sent",
+      "queued": false,
+      "sentAt": "2026-11-18T18:13:34.273Z",
+      "startedAt": null,
+      "implementedAt": null
+    }
+  }
+}

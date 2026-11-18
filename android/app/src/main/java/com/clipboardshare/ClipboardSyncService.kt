@@ -222,7 +222,7 @@ class ClipboardSyncService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Clipboard Share",
+            "Nudge",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
             setSound(null, null)
@@ -245,8 +245,8 @@ class ClipboardSyncService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Clipboard Share")
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Nudge")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openApp)

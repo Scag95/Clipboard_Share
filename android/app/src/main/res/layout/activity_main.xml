@@ -9,7 +9,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Clipboard Share"
+        android:text="Nudge"
         android:textColor="#F5F5F7"
         android:textSize="26sp"
         android:textStyle="bold" />
@@ -76,7 +76,7 @@
         android:background="@drawable/bg_help"
         android:lineSpacingMultiplier="1.2"
         android:padding="14dp"
-        android:text="Los dispositivos aparecen solos cuando el PC con Clipboard Share está encendido y en la misma red wifi."
+        android:text="Los dispositivos aparecen solos cuando el servidor del PC está encendido y en la misma red wifi."
         android:textColor="#A8A8B3"
         android:textSize="13sp" />
 </LinearLayout>
