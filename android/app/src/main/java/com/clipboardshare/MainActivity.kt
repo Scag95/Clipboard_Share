@@ -30,18 +30,34 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
+/**
+ * mDNS types the home screen browses: the current Nudge type and the
+ * pre-rename one, so servers that have not been updated are still found.
+ */
+internal object ServiceTypes {
+    const val PRIMARY = "_nudge._tcp."
+    const val LEGACY = "_clipboard-share._tcp."
+    val ALL = listOf(PRIMARY, LEGACY)
+
+    fun isKnown(serviceType: String?): Boolean {
+        val type = serviceType?.removeSuffix(".") ?: return false
+        return ALL.any { it.removeSuffix(".") == type }
+    }
+}
+
 /** Home inventory: every live NSD service plus previously selected hosts. */
 class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "ClipboardShare"
-        const val SERVICE_TYPE = "_nudge._tcp."
         const val NOTIFICATION_PERMISSION_REQUEST = 1001
         const val SEARCH_WINDOW_MS = 4_000L
     }
 
     private lateinit var nsdManager: NsdManager
-    private lateinit var discoveryListener: NsdManager.DiscoveryListener
+    /** One listener per entry of [ServiceTypes.ALL]; NSD browses one type each. */
+    private var discoveryListeners = emptyList<NsdManager.DiscoveryListener>()
+    private var failedDiscoveries = 0
     private lateinit var store: SessionStore
     private lateinit var hostList: LinearLayout
     private lateinit var statusText: TextView
@@ -85,10 +101,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Restarts NSD discovery from scratch; remembered hosts stay in the list. */
     private fun rescan() {
-        try {
-            nsdManager.stopServiceDiscovery(discoveryListener)
-        } catch (_: Exception) {
-        }
+        stopDiscovery()
         discoveredServices.clear()
         resolvingServices.clear()
         renderHosts()
@@ -134,14 +147,42 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun stopDiscovery() {
+        for (listener in discoveryListeners) {
+            try {
+                nsdManager.stopServiceDiscovery(listener)
+            } catch (_: Exception) {
+            }
+        }
+        discoveryListeners = emptyList()
+    }
+
+    /** The screen reports a discovery error only when every type failed to start. */
+    private fun onDiscoveryStartFailed() {
+        failedDiscoveries++
+        if (failedDiscoveries < ServiceTypes.ALL.size) return
+        discoveryError = true
+        searching = false
+        updateStatus()
+    }
+
+    /**
+     * Browses every type in [ServiceTypes.ALL]. Hosts stay keyed by service
+     * name, so a server announcing both types is listed once.
+     */
     private fun startDiscovery() {
-        discoveryListener = object : NsdManager.DiscoveryListener {
+        failedDiscoveries = 0
+        discoveryListeners = ServiceTypes.ALL.map { type -> startDiscovery(type) }
+    }
+
+    private fun startDiscovery(type: String): NsdManager.DiscoveryListener {
+        val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String) {
                 Log.d(TAG, "Discovery started: $regType")
             }
 
             override fun onServiceFound(service: NsdServiceInfo) {
-                if (service.serviceType.removeSuffix(".") != SERVICE_TYPE.removeSuffix(".")) return
+                if (!ServiceTypes.isKnown(service.serviceType)) return
                 runOnUiThread {
                     if (!resolvingServices.add(service.serviceName)) return@runOnUiThread
                     nsdManager.resolveService(service, object : NsdManager.ResolveListener {
@@ -178,12 +219,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Log.e(TAG, "Start discovery failed: $errorCode")
-                runOnUiThread {
-                    discoveryError = true
-                    searching = false
-                    updateStatus()
-                }
+                Log.e(TAG, "Start discovery failed for $serviceType: $errorCode")
+                runOnUiThread { onDiscoveryStartFailed() }
             }
 
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
@@ -192,16 +229,15 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             nsdManager.discoverServices(
-                SERVICE_TYPE,
+                type,
                 NsdManager.PROTOCOL_DNS_SD,
-                discoveryListener,
+                listener,
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Cannot start discovery", e)
-            discoveryError = true
-            searching = false
-            updateStatus()
+            Log.e(TAG, "Cannot start discovery for $type", e)
+            onDiscoveryStartFailed()
         }
+        return listener
     }
 
     private fun renderHosts() {
@@ -389,10 +425,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
         scanAnimator?.cancel()
-        try {
-            nsdManager.stopServiceDiscovery(discoveryListener)
-        } catch (_: Exception) {
-        }
+        stopDiscovery()
         super.onDestroy()
     }
 }

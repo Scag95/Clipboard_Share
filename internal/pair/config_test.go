@@ -1,6 +1,7 @@
 package pair
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -222,4 +223,177 @@ func TestMigrateLegacyConfigRenameFailureLeavesOldDir(t *testing.T) {
 	}
 	assertStateDir(t, oldDir, "old")
 	assertMissing(t, filepath.Join(configDir, "nudge"))
+}
+
+func TestEffectiveConfigDirRules(t *testing.T) {
+	cases := []struct {
+		name        string
+		makeNew     bool
+		makeOld     bool
+		wantDirName string
+	}{
+		{"neither", false, false, "nudge"},
+		{"only new", true, false, "nudge"},
+		{"only legacy", false, true, "clipboard-share"},
+		{"both", true, true, "nudge"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := tempHome(t)
+			newDir := filepath.Join(home, ".config", "nudge")
+			oldDir := filepath.Join(home, ".config", "clipboard-share")
+			if c.makeNew {
+				writeStateDir(t, newDir, "new")
+			}
+			if c.makeOld {
+				writeStateDir(t, oldDir, "old")
+			}
+			want := filepath.Join(home, ".config", c.wantDirName)
+			if got := EffectiveConfigDir(); got != want {
+				t.Fatalf("EffectiveConfigDir() = %q, want %q", got, want)
+			}
+			if got := StatePath(); got != filepath.Join(want, "state.json") {
+				t.Fatalf("StatePath() = %q, want under %q", got, want)
+			}
+			if got := ControlPath(); got != filepath.Join(want, "ctl.sock") {
+				t.Fatalf("ControlPath() = %q, want under %q", got, want)
+			}
+			// Resolution is side-effect free.
+			if !c.makeNew {
+				assertMissing(t, newDir)
+			}
+			if !c.makeOld {
+				assertMissing(t, oldDir)
+			}
+			if c.makeNew {
+				assertStateDir(t, newDir, "new")
+			}
+			if c.makeOld {
+				assertStateDir(t, oldDir, "old")
+			}
+		})
+	}
+}
+
+func TestEffectiveConfigDirOverridesKeepPriority(t *testing.T) {
+	home := tempHome(t)
+	writeStateDir(t, filepath.Join(home, ".config", "clipboard-share"), "old")
+	t.Setenv("NUDGE_STATE", "/tmp/override-state.json")
+	t.Setenv("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/override.sock")
+	if got := StatePath(); got != "/tmp/override-state.json" {
+		t.Fatalf("StatePath() = %q", got)
+	}
+	if got := ControlPath(); got != "/tmp/override.sock" {
+		t.Fatalf("ControlPath() = %q", got)
+	}
+}
+
+func TestMigrateLegacyConfigFailedMoveKeepsLegacyEffective(t *testing.T) {
+	home := tempHome(t)
+	oldDir := filepath.Join(home, ".config", "clipboard-share")
+	newDir := filepath.Join(home, ".config", "nudge")
+	writeStateDir(t, oldDir, "old")
+	boom := errors.New("boom")
+	prev := renameDir
+	renameDir = func(string, string) error { return boom }
+	t.Cleanup(func() { renameDir = prev })
+
+	moved, err := MigrateLegacyConfig()
+	if moved || !errors.Is(err, boom) {
+		t.Fatalf("MigrateLegacyConfig() = %v, %v; want false and boom", moved, err)
+	}
+	assertStateDir(t, oldDir, "old")
+	assertMissing(t, newDir)
+	if got := EffectiveConfigDir(); got != oldDir {
+		t.Fatalf("EffectiveConfigDir() = %q, want %q", got, oldDir)
+	}
+	if got := StatePath(); got != filepath.Join(oldDir, "state.json") {
+		t.Fatalf("StatePath() = %q, want inside the legacy dir", got)
+	}
+	if got := NewBroker().path; got != filepath.Join(oldDir, "state.json") {
+		t.Fatalf("broker path = %q, want the legacy state file", got)
+	}
+}
+
+func TestMigrateLegacyConfigSkipsWhenStateOverrideInsideLegacyDir(t *testing.T) {
+	for _, name := range []string{"NUDGE_STATE", "CLIPBOARD_SHARE_STATE"} {
+		for _, rel := range []string{"state.json", "sub/state.json"} {
+			t.Run(name+"/"+rel, func(t *testing.T) {
+				home := tempHome(t)
+				oldDir := filepath.Join(home, ".config", "clipboard-share")
+				newDir := filepath.Join(home, ".config", "nudge")
+				writeStateDir(t, oldDir, "old")
+				t.Setenv(name, filepath.Join(oldDir, rel))
+
+				moved, err := MigrateLegacyConfig()
+				if moved || !errors.Is(err, ErrStateInLegacyDir) {
+					t.Fatalf("MigrateLegacyConfig() = %v, %v; want false, ErrStateInLegacyDir", moved, err)
+				}
+				assertStateDir(t, oldDir, "old")
+				assertMissing(t, newDir)
+			})
+		}
+	}
+}
+
+func TestMigrateLegacyConfigMovesWhenStateOverrideOutsideLegacyDir(t *testing.T) {
+	home := tempHome(t)
+	oldDir := filepath.Join(home, ".config", "clipboard-share")
+	writeStateDir(t, oldDir, "old")
+	// A sibling whose name merely starts with the legacy name is outside it.
+	t.Setenv("NUDGE_STATE", oldDir+"-other/state.json")
+
+	moved, err := MigrateLegacyConfig()
+	if err != nil || !moved {
+		t.Fatalf("MigrateLegacyConfig() = %v, %v; want true, nil", moved, err)
+	}
+	assertStateDir(t, filepath.Join(home, ".config", "nudge"), "old")
+	assertMissing(t, oldDir)
+}
+
+func TestRenameIfAbsent(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeStateDir(t, src, "src")
+
+	existing := filepath.Join(dir, "existing")
+	writeStateDir(t, existing, "existing")
+	if err := renameIfAbsent(src, existing); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("existing target: err = %v, want ErrExist", err)
+	}
+	assertStateDir(t, existing, "existing")
+
+	empty := filepath.Join(dir, "empty")
+	if err := os.Mkdir(empty, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameIfAbsent(src, empty); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("empty target: err = %v, want ErrExist", err)
+	}
+	assertStateDir(t, src, "src")
+
+	dst := filepath.Join(dir, "dst")
+	if err := renameIfAbsent(src, dst); err != nil {
+		t.Fatalf("absent target: err = %v", err)
+	}
+	assertStateDir(t, dst, "src")
+	assertMissing(t, src)
+}
+
+func TestMigrateLegacyConfigSkipsWhenStateOverrideReachesLegacyDirViaSymlink(t *testing.T) {
+	home := tempHome(t)
+	oldDir := filepath.Join(home, ".config", "clipboard-share")
+	writeStateDir(t, oldDir, "old")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(oldDir, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NUDGE_STATE", filepath.Join(link, "state.json"))
+
+	moved, err := MigrateLegacyConfig()
+	if moved || !errors.Is(err, ErrStateInLegacyDir) {
+		t.Fatalf("MigrateLegacyConfig() = %v, %v; want false, ErrStateInLegacyDir", moved, err)
+	}
+	assertStateDir(t, oldDir, "old")
+	assertMissing(t, filepath.Join(home, ".config", "nudge"))
 }

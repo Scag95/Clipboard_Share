@@ -31,8 +31,9 @@ func main() {
 }
 
 // migrateConfig moves the pre-rename ~/.config/clipboard-share directory to
-// ~/.config/nudge once. Failure is reported and the old directory is left as
-// it was; startup continues.
+// ~/.config/nudge once. Only the server migrates. Failure (or a state override
+// inside the old directory) is reported and the old directory is left as it
+// was; startup continues with the effective dir, so pairings stay available.
 func migrateConfig(logf func(format string, args ...any)) {
 	moved, err := pair.MigrateLegacyConfig()
 	if err != nil {
@@ -80,6 +81,7 @@ func pairNotification(deviceName string) (title, body string) {
 
 func runServer() {
 	migrateConfig(log.Printf)
+	log.Printf("config dir: %s", pair.EffectiveConfigDir())
 	port := serverPort()
 
 	pairer, err := pair.Load()
@@ -164,7 +166,8 @@ func runPairClient(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	migrateConfig(func(format string, args ...any) { fmt.Fprintf(stderr, format, args...) })
+	// No migration here: the CLI reaches the socket of the effective dir, so a
+	// not-yet-migrated or still-running old server stays reachable.
 	conn, err := net.DialTimeout("unix", pair.ControlPath(), 2*time.Second)
 	if err != nil {
 		fmt.Fprintf(stderr, "nudge pair: cannot connect to server at %s: %v (is the server running?)\n", pair.ControlPath(), err)

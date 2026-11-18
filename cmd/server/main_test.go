@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"nudge/internal/pair"
 )
 
 func TestInstanceNameFallsBackToNudge(t *testing.T) {
@@ -84,29 +87,78 @@ func TestPairClientUnreachableServerMessage(t *testing.T) {
 	}
 }
 
-func TestPairClientMigratesLegacyConfigDir(t *testing.T) {
-	home := t.TempDir()
+func legacyOnlyHome(t *testing.T) (home, oldDir string) {
+	t.Helper()
+	home = t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("NUDGE_CTL_SOCK", "")
-	t.Setenv("CLIPBOARD_SHARE_CTL_SOCK", "")
-	oldDir := filepath.Join(home, ".config", "clipboard-share")
+	for _, name := range []string{"NUDGE_STATE", "CLIPBOARD_SHARE_STATE", "NUDGE_CTL_SOCK", "CLIPBOARD_SHARE_CTL_SOCK"} {
+		t.Setenv(name, "")
+	}
+	oldDir = filepath.Join(home, ".config", "clipboard-share")
 	if err := os.MkdirAll(oldDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(oldDir, "state.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return home, oldDir
+}
+
+// The CLI never migrates: it reaches the socket of the effective (legacy)
+// dir, so a not-yet-migrated or still-running old server stays reachable.
+func TestPairClientDoesNotMigrateAndUsesLegacySocket(t *testing.T) {
+	home, oldDir := legacyOnlyHome(t)
 	var stdout, stderr bytes.Buffer
-	runPairClient([]string{"list"}, &stdout, &stderr)
-	data, err := os.ReadFile(filepath.Join(home, ".config", "nudge", "state.json"))
+	if code := runPairClient([]string{"list"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit code = %d, want 1 (no server)", code)
+	}
+	data, err := os.ReadFile(filepath.Join(oldDir, "state.json"))
+	if err != nil || string(data) != "{}" {
+		t.Fatalf("legacy state = %q, err = %v; want untouched", data, err)
+	}
+	newDir := filepath.Join(home, ".config", "nudge")
+	if _, err := os.Lstat(newDir); !os.IsNotExist(err) {
+		t.Fatalf("%s exists (err=%v), want missing", newDir, err)
+	}
+	if got := pair.EffectiveConfigDir(); got != oldDir {
+		t.Fatalf("EffectiveConfigDir() = %q, want %q", got, oldDir)
+	}
+	want := "nudge pair: cannot connect to server at " + filepath.Join(oldDir, "ctl.sock") + ": "
+	if !strings.HasPrefix(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want prefix %q", stderr.String(), want)
+	}
+}
+
+func TestServerMigrateConfigMovesLegacyDir(t *testing.T) {
+	home, oldDir := legacyOnlyHome(t)
+	var logs []string
+	migrateConfig(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) })
+	newDir := filepath.Join(home, ".config", "nudge")
+	data, err := os.ReadFile(filepath.Join(newDir, "state.json"))
 	if err != nil || string(data) != "{}" {
 		t.Fatalf("migrated state = %q, err = %v", data, err)
 	}
 	if _, err := os.Lstat(oldDir); !os.IsNotExist(err) {
 		t.Fatalf("old dir still present: %v", err)
 	}
-	if !strings.Contains(stderr.String(), filepath.Join(home, ".config", "nudge", "ctl.sock")) {
-		t.Fatalf("stderr = %q, want the new control socket path", stderr.String())
+	if want := "nudge: moved " + oldDir + " to " + newDir + "\n"; len(logs) != 1 || logs[0] != want {
+		t.Fatalf("logs = %q, want [%q]", logs, want)
+	}
+}
+
+func TestServerMigrateConfigSkipsStateOverrideInLegacyDir(t *testing.T) {
+	home, oldDir := legacyOnlyHome(t)
+	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(oldDir, "state.json"))
+	var logs []string
+	migrateConfig(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) })
+	if _, err := os.Stat(filepath.Join(oldDir, "state.json")); err != nil {
+		t.Fatalf("legacy state moved: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".config", "nudge")); !os.IsNotExist(err) {
+		t.Fatalf("new dir created: %v", err)
+	}
+	if len(logs) != 1 || !strings.HasPrefix(logs[0], "nudge: config migration skipped, "+oldDir+" left untouched: ") {
+		t.Fatalf("logs = %q", logs)
 	}
 }
 
