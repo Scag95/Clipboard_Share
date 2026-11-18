@@ -83,11 +83,9 @@ class MainActivity : AppCompatActivity() {
                             Log.d(TAG, "Resolved: ${si.serviceName} ${si.host}:${si.port} all=${if (Build.VERSION.SDK_INT >= 34) si.hostAddresses else null}")
                             runOnUiThread {
                                 resolvingServices.remove(si.serviceName)
-                                if (pickAddress(si) != null && si.port > 0) {
+                                if (si.port > 0) {
                                     discoveredServices[si.serviceName] = si
                                     renderHosts()
-                                } else {
-                                    Log.w(TAG, "No usable address for ${si.serviceName}")
                                 }
                             }
                         }
@@ -135,13 +133,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderHosts() {
+        val rememberedAll = store.getLastHosts()
         val live = discoveredServices.mapNotNull { (name, service) ->
-            val host = pickAddress(service) ?: return@mapNotNull null
+            // NSD sometimes resolves only a link-local address; the same service
+            // is still on the network, so fall back to the address remembered for it.
+            val host = pickAddress(service)
+                ?: rememberedAll.firstOrNull { it.name == name && it.port == service.port }?.host
+                ?: run {
+                    Log.w(TAG, "No usable address for $name")
+                    return@mapNotNull null
+                }
             SessionStore.LastHost(name, host, service.port, 0L)
         }.sortedBy { it.name.lowercase() }
         val liveKeys = live.mapTo(mutableSetOf()) { SessionStore.hostKey(it.host, it.port) }
         val liveNames = live.mapTo(mutableSetOf()) { it.name }
-        val remembered = store.getLastHosts()
+        val remembered = rememberedAll
             .filter { SessionStore.hostKey(it.host, it.port) !in liveKeys && it.name !in liveNames }
             .sortedByDescending { it.lastConnected }
 

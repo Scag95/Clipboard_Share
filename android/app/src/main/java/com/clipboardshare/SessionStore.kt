@@ -58,7 +58,7 @@ class SessionStore(context: Context) {
                     val item = json.optJSONObject(index) ?: continue
                     val host = item.optString("host")
                     val port = item.optInt("port", 0)
-                    if (host.isEmpty() || port <= 0) continue
+                    if (!HostAddress.isUsable(host) || port <= 0) continue
                     add(
                         LastHost(
                             name = item.optString("name").ifEmpty { host },

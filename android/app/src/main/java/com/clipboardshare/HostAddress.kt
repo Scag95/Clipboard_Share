@@ -16,6 +16,10 @@ object HostAddress {
             ?.hostAddress?.substringBefore('%')
     }
 
+    /** False for a zoned or link-local IPv6 literal, which OkHttp cannot connect to. */
+    fun isUsable(host: String): Boolean =
+        host.isNotEmpty() && '%' !in host && !host.startsWith("fe80:", ignoreCase = true)
+
     fun serverUrl(host: String, port: Int): String {
         val address = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
         return "http://$address:$port"

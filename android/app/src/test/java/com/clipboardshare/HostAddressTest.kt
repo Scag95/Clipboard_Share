@@ -34,4 +34,13 @@ class HostAddressTest {
         assertEquals("http://[2001:db8::5]:8765", HostAddress.serverUrl("2001:db8::5", 8765))
         assertEquals("http://192.168.0.14:8765", HostAddress.serverUrl("192.168.0.14", 8765))
     }
+
+    @Test
+    fun usableRejectsZonedAndLinkLocalAddressesButKeepsRoutableOnes() {
+        assertEquals(true, HostAddress.isUsable("192.168.0.14"))
+        assertEquals(true, HostAddress.isUsable("2001:db8::5"))
+        assertEquals(false, HostAddress.isUsable("fe80::ea12:b8b6:7fae:ebbd%wlan0"))
+        assertEquals(false, HostAddress.isUsable("fe80::1"))
+        assertEquals(false, HostAddress.isUsable(""))
+    }
 }
