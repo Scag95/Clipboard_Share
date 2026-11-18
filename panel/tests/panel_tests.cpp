@@ -18,6 +18,7 @@
 
 #include <memory>
 
+#include "autostart.h"
 #include "backend.h"
 #include "fakeserver.h"
 
@@ -44,6 +45,72 @@ int commandCount(const FakeServer &server, const QString &cmd) {
 void settle() {
     QTest::qWait(200);
 }
+
+QByteArray readFile(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+bool writeFile(const QString &path, const QByteArray &data) {
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(data) == data.size();
+}
+
+// The value of `key=` in a desktop entry.
+QString desktopValue(const QByteArray &entry, const QString &key) {
+    for (const auto &line : QString::fromUtf8(entry).split('\n'))
+        if (line.startsWith(key + "="))
+            return line.mid(key.size() + 1).trimmed();
+    return {};
+}
+
+// Plays systemctl: records every call and answers from a script.
+struct FakeSystemctl {
+    QList<QStringList> calls;
+    bool enabled = true;
+    int failCode = 0;
+    QString failOutput;
+
+    Autostart::Runner runner() {
+        return [this](const QStringList &args) -> Autostart::Result {
+            calls.append(args);
+            if (args.value(0) == "is-enabled")
+                return {enabled ? 0 : 1, enabled ? "enabled\n" : "disabled\n"};
+            if (failCode != 0)
+                return {failCode, failOutput};
+            if (args.value(0) == "enable")
+                enabled = true;
+            if (args.value(0) == "disable")
+                enabled = false;
+            return {0, {}};
+        };
+    }
+
+    int count(const QStringList &args) const { return int(calls.count(args)); }
+};
+
+// Sets or clears an environment variable for one scope, then restores it.
+class ScopedEnv {
+public:
+    ScopedEnv(const char *name, const QByteArray &value) : m_name(name), m_had(qEnvironmentVariableIsSet(name)),
+                                                         m_old(qgetenv(name)) {
+        if (value.isNull())
+            qunsetenv(name);
+        else
+            qputenv(name, value);
+    }
+    ~ScopedEnv() {
+        if (m_had)
+            qputenv(m_name, m_old);
+        else
+            qunsetenv(m_name);
+    }
+
+private:
+    const char *m_name;
+    bool m_had;
+    QByteArray m_old;
+};
 
 } // namespace
 
@@ -287,10 +354,482 @@ private slots:
     }
 
     void socketPathHonorsTheEnvironmentOverride() {
-        qputenv("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/custom-ctl.sock");
+        ScopedEnv fresh("NUDGE_CTL_SOCK", "/tmp/nudge-ctl.sock");
+        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/custom-ctl.sock");
         Backend backend;
-        qunsetenv("CLIPBOARD_SHARE_CTL_SOCK");
+        QCOMPARE(backend.socketPath(), QString("/tmp/nudge-ctl.sock"));
+    }
+
+    void socketPathFallsBackToTheOldEnvironmentName() {
+        ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
+        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/custom-ctl.sock");
+        Backend backend;
         QCOMPARE(backend.socketPath(), QString("/tmp/custom-ctl.sock"));
+    }
+
+    // S9: the effective config dir, and the panel never moves or creates it.
+    void theEffectiveConfigDirectoryFollowsTheSharedRule_data() {
+        QTest::addColumn<bool>("withNudge");
+        QTest::addColumn<bool>("withLegacy");
+        QTest::addColumn<QString>("expected");
+        QTest::newRow("neither") << false << false << "home/.config/nudge/ctl.sock";
+        QTest::newRow("only nudge") << true << false << "home/.config/nudge/ctl.sock";
+        QTest::newRow("only legacy") << false << true << "home/.config/clipboard-share/ctl.sock";
+        QTest::newRow("both") << true << true << "home/.config/nudge/ctl.sock";
+    }
+
+    void theEffectiveConfigDirectoryFollowsTheSharedRule() {
+        QFETCH(bool, withNudge);
+        QFETCH(bool, withLegacy);
+        QFETCH(QString, expected);
+        ScopedEnv home("HOME", sandbox("home").toUtf8());
+        ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
+        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
+        QVERIFY(QDir().mkpath(sandbox("home/.config")));
+        if (withNudge) {
+            QVERIFY(QDir().mkpath(sandbox("home/.config/nudge")));
+            QVERIFY(writeFile(sandbox("home/.config/nudge/state.json"), "new"));
+        }
+        if (withLegacy) {
+            QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
+            QVERIFY(writeFile(sandbox("home/.config/clipboard-share/state.json"), "old"));
+        }
+
+        Backend backend({}, 0);
+        QSignalSpy changed(&backend, &Backend::changed);
+        backend.refresh();
+        QVERIFY(waitChanged(changed));
+
+        QCOMPARE(backend.socketPath(), sandbox(expected));
+        QVERIFY2(backend.error().contains(sandbox(expected)), qPrintable(backend.error()));
+        QCOMPARE(QFileInfo::exists(sandbox("home/.config/nudge")), withNudge);
+        QCOMPARE(QFileInfo::exists(sandbox("home/.config/clipboard-share")), withLegacy);
+        if (withNudge)
+            QCOMPARE(readFile(sandbox("home/.config/nudge/state.json")), QByteArray("new"));
+        if (withLegacy)
+            QCOMPARE(readFile(sandbox("home/.config/clipboard-share/state.json")), QByteArray("old"));
+    }
+
+    // The panel's whole startup path leaves the legacy directory as it is and
+    // creates no ~/.config/nudge: only the server migrates.
+    void theStartupPathNeverTouchesTheLegacyDirectory() {
+        ScopedEnv home("HOME", sandbox("home").toUtf8());
+        ScopedEnv state("XDG_STATE_HOME", sandbox("xdg-state").toUtf8());
+        ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
+        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
+        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
+        QVERIFY(writeFile(sandbox("home/.config/clipboard-share/state.json"), "{\"devices\":[1]}"));
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+
+        Autostart autostart({}, sandbox("xdg"), systemctl.runner());
+        autostart.applyFirstRunDefaults();
+        Backend backend({}, 0);
+        QSignalSpy changed(&backend, &Backend::changed);
+        autostart.startServerWhenOffline(&backend);
+        backend.refresh();
+        QVERIFY(waitChanged(changed));
+        QTRY_COMPARE_WITH_TIMEOUT(systemctl.count({"start", Autostart::Unit}), 1, 2000);
+
+        QVERIFY(!QFileInfo::exists(sandbox("home/.config/nudge")));
+        QCOMPARE(readFile(sandbox("home/.config/clipboard-share/state.json")), QByteArray("{\"devices\":[1]}"));
+        QCOMPARE(QDir(sandbox("home/.config/clipboard-share")).entryList(QDir::NoDotAndDotDot | QDir::AllEntries),
+                 QStringList{"state.json"});
+        QVERIFY(QFileInfo::exists(sandbox("xdg-state/nudge-panel/autostart-defaults-applied")));
+    }
+
+    // After the server moves the old directory, the next exchange uses the
+    // socket in the new one.
+    void theSocketPathFollowsTheServersMigration() {
+        ScopedEnv home("HOME", sandbox("home").toUtf8());
+        ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
+        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
+        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
+        auto server = std::make_unique<FakeServer>(sandbox("home/.config/clipboard-share/ctl.sock"));
+        server->devices = {device("d1", "Galaxy", "192.168.0.20")};
+        Backend backend({}, 0);
+        backend.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(backend.online(), 2000);
+        QCOMPARE(backend.socketPath(), sandbox("home/.config/clipboard-share/ctl.sock"));
+
+        // What the server does at startup.
+        server.reset();
+        QVERIFY(QDir().rename(sandbox("home/.config/clipboard-share"), sandbox("home/.config/nudge")));
+        server = std::make_unique<FakeServer>(sandbox("home/.config/nudge/ctl.sock"));
+        server->devices = {device("d2", "Pixel", "192.168.0.21")};
+        backend.refresh();
+
+        QTRY_COMPARE_WITH_TIMEOUT(commandCount(*server, "list"), 1, 2000);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.devices().value(0).toMap().value("name").toString(), QString("Pixel"), 2000);
+        QVERIFY(backend.online());
+        QCOMPARE(backend.socketPath(), sandbox("home/.config/nudge/ctl.sock"));
+    }
+
+    // The overrides still win, resolved at each use too.
+    void theSocketOverridesWinOverTheConfigDirectory() {
+        ScopedEnv home("HOME", sandbox("home").toUtf8());
+        ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
+        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
+        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
+        Backend backend({}, 0);
+        QCOMPARE(backend.socketPath(), sandbox("home/.config/clipboard-share/ctl.sock"));
+        qputenv("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/custom-ctl.sock");
+        QCOMPARE(backend.socketPath(), QString("/tmp/custom-ctl.sock"));
+        qputenv("NUDGE_CTL_SOCK", "/tmp/nudge-ctl.sock");
+        QCOMPARE(backend.socketPath(), QString("/tmp/nudge-ctl.sock"));
+    }
+
+    // S10: the first-run marker lives under XDG state.
+    void theFirstRunMarkerLivesUnderXdgState() {
+        ScopedEnv home("HOME", sandbox("home").toUtf8());
+        ScopedEnv state("XDG_STATE_HOME", sandbox("xdg-state").toUtf8());
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+        Autostart autostart({}, sandbox("xdg"), systemctl.runner());
+
+        autostart.applyFirstRunDefaults();
+
+        QCOMPARE(autostart.markerPath(), sandbox("xdg-state/nudge-panel/autostart-defaults-applied"));
+        QVERIFY(QFileInfo::exists(autostart.markerPath()));
+        QVERIFY(!QFileInfo::exists(sandbox("home/.config")));
+        QVERIFY(!QFileInfo::exists(sandbox("home/.local")));
+        QCOMPARE(autostart.error(), QString());
+    }
+
+    void theFirstRunMarkerDefaultsToLocalState() {
+        ScopedEnv home("HOME", sandbox("home").toUtf8());
+        ScopedEnv state("XDG_STATE_HOME", QByteArray());
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+        Autostart autostart({}, sandbox("xdg"), systemctl.runner());
+
+        autostart.applyFirstRunDefaults();
+
+        QVERIFY(QFileInfo::exists(sandbox("home/.local/state/nudge-panel/autostart-defaults-applied")));
+        QVERIFY(!QFileInfo::exists(sandbox("home/.config")));
+    }
+
+    // A failed enable writes no marker and is retried by the next launch.
+    void aFailedFirstRunEnableIsRetriedAtTheNextLaunch() {
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+        systemctl.failCode = 1;
+        systemctl.failOutput = "Failed to enable unit: boom\n";
+        {
+            Autostart first(sandbox("state"), sandbox("xdg"), systemctl.runner());
+            first.applyFirstRunDefaults();
+            QVERIFY(!first.serverEnabled());
+            QCOMPARE(first.error(), QString("No se pudo activar el inicio del servidor: Failed to enable unit: boom"));
+            QVERIFY(!QFileInfo::exists(first.markerPath()));
+            QVERIFY(!QFileInfo::exists(sandbox("state")));
+        }
+        systemctl.failCode = 0;
+        Autostart next(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        next.applyFirstRunDefaults();
+
+        QCOMPARE(systemctl.count({"enable", Autostart::Unit}), 2);
+        QVERIFY(next.serverEnabled());
+        QCOMPARE(next.error(), QString());
+        QVERIFY(QFileInfo::exists(sandbox("state/autostart-defaults-applied")));
+    }
+
+    // When the enable fails and the state directory is unusable, the enable
+    // error is the one shown.
+    void theEnableErrorIsKeptWhenTheMarkerCannotBeWrittenEither() {
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+        systemctl.failCode = 1;
+        systemctl.failOutput = "Failed to enable unit: boom";
+        QVERIFY(writeFile(sandbox("state"), "not a directory"));
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+
+        autostart.applyFirstRunDefaults();
+
+        QCOMPARE(autostart.error(), QString("No se pudo activar el inicio del servidor: Failed to enable unit: boom"));
+        QCOMPARE(readFile(sandbox("state")), QByteArray("not a directory"));
+    }
+
+    // An enable that worked with a marker that cannot be written says so and
+    // leaves the server enabled; the next launch tries again.
+    void aMarkerThatCannotBeWrittenIsReported() {
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+        QVERIFY(writeFile(sandbox("state"), "not a directory"));
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+
+        autostart.applyFirstRunDefaults();
+
+        QVERIFY(autostart.serverEnabled());
+        QCOMPARE(autostart.error(), QString("No se pudo escribir %1").arg(sandbox("state/autostart-defaults-applied")));
+        autostart.applyFirstRunDefaults();
+        QCOMPARE(systemctl.count({"enable", Autostart::Unit}), 2);
+    }
+
+    // Only the [Desktop Entry] group of the override decides.
+    void theOverrideCountsOnlyInTheDesktopEntryGroup_data() {
+        QTest::addColumn<QByteArray>("override");
+        QTest::addColumn<bool>("enabled");
+        QTest::newRow("hidden") << QByteArray("[Desktop Entry]\nName=Nudge\nHidden=true\n") << false;
+        QTest::newRow("hidden in an action")
+            << QByteArray("[Desktop Entry]\nName=Nudge\n\n[Desktop Action quit]\nHidden=true\n") << true;
+        QTest::newRow("hidden before any group") << QByteArray("Hidden=true\n[Desktop Entry]\nName=Nudge\n") << true;
+        QTest::newRow("commented out") << QByteArray("[Desktop Entry]\n# Hidden=true\n") << true;
+        QTest::newRow("hidden false") << QByteArray("[Desktop Entry]\nHidden=false\n") << true;
+        QTest::newRow("gnome disabled") << QByteArray("[Desktop Entry]\nX-GNOME-Autostart-enabled=false\n") << false;
+        QTest::newRow("gnome enabled") << QByteArray("[Desktop Entry]\nX-GNOME-Autostart-enabled=true\n") << true;
+        QTest::newRow("gnome disabled in an action")
+            << QByteArray("[Desktop Entry]\n[Desktop Action x]\nX-GNOME-Autostart-enabled=false\n") << true;
+    }
+
+    void theOverrideCountsOnlyInTheDesktopEntryGroup() {
+        QFETCH(QByteArray, override);
+        QFETCH(bool, enabled);
+        FakeSystemctl systemctl;
+        QVERIFY(QDir().mkpath(sandbox("xdg/autostart")));
+        QVERIFY(writeFile(sandbox("xdg/autostart/nudge-panel.desktop"), override));
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+
+        QCOMPARE(autostart.panelEnabled(), enabled);
+
+        // Turning it on removes only an override that turns the panel off.
+        QVERIFY(autostart.setPanelEnabled(true));
+        QVERIFY(autostart.panelEnabled());
+        if (enabled)
+            QCOMPARE(readFile(sandbox("xdg/autostart/nudge-panel.desktop")), override);
+        else
+            QVERIFY(!QFileInfo::exists(sandbox("xdg/autostart/nudge-panel.desktop")));
+    }
+
+    // Autostart: the panel's two login switches (S4, S5).
+
+    void disablingThePanelWritesAHiddenOverrideLikeThePackagedEntry() {
+        FakeSystemctl systemctl;
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        QSignalSpy changed(&autostart, &Autostart::changed);
+        QVERIFY(autostart.panelEnabled());
+
+        QVERIFY(autostart.setPanelEnabled(false));
+
+        QVERIFY(!autostart.panelEnabled());
+        QCOMPARE(autostart.error(), QString());
+        QVERIFY(changed.count() >= 1);
+        QCOMPARE(autostart.overridePath(), sandbox("xdg/autostart/nudge-panel.desktop"));
+        const QByteArray written = readFile(sandbox("xdg/autostart/nudge-panel.desktop"));
+        const QByteArray packaged = readFile(QStringLiteral(PACKAGED_AUTOSTART));
+        QVERIFY2(!packaged.isEmpty(), PACKAGED_AUTOSTART);
+        QVERIFY2(written.startsWith("[Desktop Entry]\n"), written.constData());
+        QCOMPARE(desktopValue(written, "Hidden"), QString("true"));
+        QCOMPARE(desktopValue(written, "Name"), desktopValue(packaged, "Name"));
+        QCOMPARE(desktopValue(written, "Exec"), desktopValue(packaged, "Exec"));
+        QCOMPARE(desktopValue(packaged, "Name"), QString("Nudge"));
+        QCOMPARE(desktopValue(packaged, "Exec"), QString("nudge-panel --background"));
+        QVERIFY(systemctl.count({"enable", Autostart::Unit}) == 0 && systemctl.count({"disable", Autostart::Unit}) == 0);
+    }
+
+    void enablingThePanelRemovesTheOverrideAndNothingElse() {
+        FakeSystemctl systemctl;
+        QVERIFY(QDir().mkpath(sandbox("xdg/autostart")));
+        QVERIFY(writeFile(sandbox("xdg/autostart/other.desktop"), "[Desktop Entry]\nName=Other\nHidden=true\n"));
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+
+        QVERIFY(autostart.setPanelEnabled(false));
+        QVERIFY(autostart.setPanelEnabled(true));
+
+        QVERIFY(autostart.panelEnabled());
+        QCOMPARE(autostart.error(), QString());
+        QVERIFY(!QFileInfo::exists(sandbox("xdg/autostart/nudge-panel.desktop")));
+        QCOMPARE(QDir(sandbox("xdg/autostart")).entryList(QDir::Files), QStringList{"other.desktop"});
+        QCOMPARE(readFile(sandbox("xdg/autostart/other.desktop")), QByteArray("[Desktop Entry]\nName=Other\nHidden=true\n"));
+    }
+
+    // A user override without Hidden=true does not disable the panel, and
+    // turning the switch on leaves it alone.
+    void aUserOverrideWithoutHiddenCountsAsEnabledAndIsKept() {
+        FakeSystemctl systemctl;
+        QVERIFY(QDir().mkpath(sandbox("xdg/autostart")));
+        QVERIFY(writeFile(sandbox("xdg/autostart/nudge-panel.desktop"), "[Desktop Entry]\nExec=nudge-panel\n"));
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        QVERIFY(autostart.panelEnabled());
+
+        QVERIFY(autostart.setPanelEnabled(true));
+
+        QCOMPARE(readFile(sandbox("xdg/autostart/nudge-panel.desktop")), QByteArray("[Desktop Entry]\nExec=nudge-panel\n"));
+    }
+
+    void aPanelOverrideThatCannotBeWrittenIsReported() {
+        FakeSystemctl systemctl;
+        QVERIFY(QDir().mkpath(sandbox("xdg")));
+        // A file where the autostart directory should be.
+        QVERIFY(writeFile(sandbox("xdg/autostart"), "not a directory"));
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        QSignalSpy changed(&autostart, &Autostart::changed);
+
+        QVERIFY(!autostart.setPanelEnabled(false));
+
+        QVERIFY(autostart.panelEnabled());
+        QVERIFY2(autostart.error().contains(sandbox("xdg/autostart")), qPrintable(autostart.error()));
+        QVERIFY(changed.count() >= 1);
+        QCOMPARE(readFile(sandbox("xdg/autostart")), QByteArray("not a directory"));
+    }
+
+    void theServerSwitchEnablesAndDisablesTheUserUnit() {
+        FakeSystemctl systemctl;
+        systemctl.enabled = true;
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        QVERIFY(autostart.serverEnabled());
+        QCOMPARE(systemctl.count({"is-enabled", Autostart::Unit}), 1);
+
+        QVERIFY(autostart.setServerEnabled(false));
+        QVERIFY(!autostart.serverEnabled());
+        QCOMPARE(systemctl.calls.last(), (QStringList{"disable", Autostart::Unit}));
+
+        QVERIFY(autostart.setServerEnabled(true));
+        QVERIFY(autostart.serverEnabled());
+        QCOMPARE(systemctl.calls.last(), (QStringList{"enable", Autostart::Unit}));
+        QCOMPARE(autostart.error(), QString());
+        // The server switch never touches the panel's autostart.
+        QVERIFY(!QFileInfo::exists(sandbox("xdg/autostart")));
+    }
+
+    void aSystemctlFailureIsReportedAndKeepsTheSwitch() {
+        FakeSystemctl systemctl;
+        systemctl.enabled = true;
+        systemctl.failCode = 1;
+        systemctl.failOutput = "Failed to disable unit: Access denied\n";
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        QSignalSpy changed(&autostart, &Autostart::changed);
+
+        QVERIFY(!autostart.setServerEnabled(false));
+
+        QVERIFY(autostart.serverEnabled());
+        QVERIFY2(autostart.error().contains("Failed to disable unit: Access denied"), qPrintable(autostart.error()));
+        QVERIFY(changed.count() >= 1);
+
+        // The next success clears it.
+        systemctl.failCode = 0;
+        QVERIFY(autostart.setServerEnabled(false));
+        QCOMPARE(autostart.error(), QString());
+    }
+
+    void theFirstRunEnablesTheServerOnceAndNeverAgain() {
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+        {
+            Autostart first(sandbox("state"), sandbox("xdg"), systemctl.runner());
+            QVERIFY(!first.serverEnabled());
+            first.applyFirstRunDefaults();
+            QVERIFY(first.serverEnabled());
+            first.applyFirstRunDefaults();
+            QCOMPARE(systemctl.count({"enable", Autostart::Unit}), 1);
+            // The user turns it off.
+            QVERIFY(first.setServerEnabled(false));
+        }
+        Autostart later(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        later.applyFirstRunDefaults();
+
+        QVERIFY(!later.serverEnabled());
+        QCOMPARE(systemctl.count({"enable", Autostart::Unit}), 1);
+        QVERIFY(later.panelEnabled());
+        QVERIFY(!QFileInfo::exists(sandbox("xdg/autostart")));
+    }
+
+    void thePanelStartsAnOfflineServerOnce() {
+        FakeSystemctl systemctl;
+        systemctl.enabled = false;
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        Backend backend(m_dir.filePath("nope.sock"), 0);
+        QSignalSpy changed(&backend, &Backend::changed);
+        autostart.startServerWhenOffline(&backend);
+
+        backend.refresh();
+        QVERIFY(waitChanged(changed));
+        QTRY_COMPARE_WITH_TIMEOUT(systemctl.count({"start", Autostart::Unit}), 1, 2000);
+        backend.refresh();
+        settle();
+        QCOMPARE(systemctl.count({"start", Autostart::Unit}), 1);
+        // Starting it now says nothing about logging in.
+        QCOMPARE(systemctl.count({"enable", Autostart::Unit}), 0);
+    }
+
+    // The backend may already know the server is down when the panel asks.
+    void aServerAlreadyKnownOfflineIsStarted() {
+        FakeSystemctl systemctl;
+        systemctl.failCode = 5;
+        systemctl.failOutput = "Unit nudge.service not found.";
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        Backend backend(m_dir.filePath("nope.sock"), 0);
+        QSignalSpy changed(&backend, &Backend::changed);
+        backend.refresh();
+        QVERIFY(waitChanged(changed));
+
+        autostart.startServerWhenOffline(&backend);
+
+        QCOMPARE(systemctl.count({"start", Autostart::Unit}), 1);
+        QVERIFY2(autostart.error().contains("Unit nudge.service not found."), qPrintable(autostart.error()));
+    }
+
+    void thePanelLeavesARunningServerAlone() {
+        FakeServer server(m_path);
+        FakeSystemctl systemctl;
+        Autostart autostart(sandbox("state"), sandbox("xdg"), systemctl.runner());
+        Backend backend(m_path, 0);
+        QSignalSpy changed(&backend, &Backend::changed);
+        autostart.startServerWhenOffline(&backend);
+
+        backend.refresh();
+        QVERIFY(waitChanged(changed));
+        settle();
+        QVERIFY(backend.online());
+        QCOMPARE(systemctl.count({"start", Autostart::Unit}), 0);
+    }
+
+    // The real panel binary, with a fake systemctl first on PATH.
+    void aLaunchedPanelStartsTheServerAndEnablesItOnTheFirstRunOnly() {
+        QProcess *first = startPanel();
+        QTRY_VERIFY_WITH_TIMEOUT(systemctlLog().contains("--user start nudge.service"), 10000);
+        QVERIFY(first->state() == QProcess::Running);
+        QTRY_COMPARE_WITH_TIMEOUT(systemctlLog().count("--user enable nudge.service"), 1, 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(markerPath()), 10000);
+        QVERIFY(!QFileInfo::exists(sandbox("home/.config/nudge")));
+        cleanup();
+
+        QProcess *second = startPanel();
+        QTRY_VERIFY_WITH_TIMEOUT(systemctlLog().count("--user start nudge.service") == 2, 10000);
+        QVERIFY(second->state() == QProcess::Running);
+        QCOMPARE(systemctlLog().count("--user enable nudge.service"), 1);
+    }
+
+    void aLaunchedPanelRetriesAFailedEnableAtTheNextLaunch() {
+        QVERIFY(writeFile(sandbox("enable-fails"), ""));
+        QProcess *first = startPanel();
+        QTRY_VERIFY_WITH_TIMEOUT(systemctlLog().contains("--user enable nudge.service"), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(systemctlLog().contains("--user start nudge.service"), 10000);
+        QTest::qWait(300);
+        QVERIFY(first->state() == QProcess::Running);
+        QVERIFY(!QFileInfo::exists(markerPath()));
+        cleanup();
+
+        QVERIFY(QFile::remove(sandbox("enable-fails")));
+        QProcess *second = startPanel();
+        QTRY_COMPARE_WITH_TIMEOUT(systemctlLog().count("--user enable nudge.service"), 2, 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(markerPath()), 10000);
+        QVERIFY(second->state() == QProcess::Running);
+    }
+
+    // The real binary with only the legacy directory and no socket override:
+    // it uses the old socket and leaves the directory alone.
+    void aLaunchedPanelLeavesTheLegacyDirectoryAlone() {
+        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
+        QVERIFY(writeFile(sandbox("home/.config/clipboard-share/state.json"), "{\"devices\":[1]}"));
+        QProcess *panel = startPanel(false);
+        QTRY_VERIFY_WITH_TIMEOUT(systemctlLog().contains("--user start nudge.service"), 10000);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(markerPath()), 10000);
+        QVERIFY(panel->state() == QProcess::Running);
+
+        QVERIFY(!QFileInfo::exists(sandbox("home/.config/nudge")));
+        QCOMPARE(QDir(sandbox("home/.config/clipboard-share")).entryList(QDir::NoDotAndDotDot | QDir::AllEntries),
+                 QStringList{"state.json"});
+        QCOMPARE(readFile(sandbox("home/.config/clipboard-share/state.json")), QByteArray("{\"devices\":[1]}"));
     }
 
     // Single instance, driven through the built panel binary, offscreen and
@@ -301,7 +840,7 @@ private slots:
         QProcess *first = startPanel();
         QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(activationPath()), 10000);
         QVERIFY(first->state() == QProcess::Running);
-        QVERIFY2(!QFileInfo::exists(sandbox("tmp/clipboard-share-panel")),
+        QVERIFY2(!QFileInfo::exists(sandbox("tmp/nudge-panel")),
                  "activation socket left in the shared temp directory");
 
         QLocalSocket socket;
@@ -386,16 +925,31 @@ private slots:
 
 private:
     QString sandbox(const QString &name) const { return m_sandbox->filePath(name); }
-    QString activationPath() const { return sandbox("runtime/clipboard-share-panel.socket"); }
-    QString lockPath() const { return sandbox("runtime/clipboard-share-panel.lock"); }
+    QString activationPath() const { return sandbox("runtime/nudge-panel.socket"); }
+    QString lockPath() const { return sandbox("runtime/nudge-panel.lock"); }
+    QString systemctlLog() const { return QString::fromUtf8(readFile(sandbox("systemctl.log"))); }
+    QString markerPath() const { return sandbox("home/.local/state/nudge-panel/autostart-defaults-applied"); }
 
-    QProcess *startPanel() {
+    QProcess *startPanel(bool overrideSocket = true) {
         const QString binary = QStringLiteral(PANEL_BINARY);
         if (!QFileInfo::exists(binary))
             qFatal("panel binary %s is missing; bin/test builds it", qPrintable(binary));
-        for (const char *dir : {"runtime", "tmp", "home"})
+        for (const char *dir : {"runtime", "tmp", "home", "bin"})
             QDir().mkpath(sandbox(dir));
         QFile::setPermissions(sandbox("runtime"), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        // The panel runs systemctl; this one only records the call, so the
+        // tests never reach the user's real units. enable fails while the
+        // enable-fails file exists.
+        const QString fake = sandbox("bin/systemctl");
+        if (!QFileInfo::exists(fake)) {
+            const QByteArray script = "#!/bin/sh\necho \"$*\" >> '" + sandbox("systemctl.log").toUtf8() +
+                                      "'\ncase \"$2\" in is-enabled) echo disabled; exit 1;;\n"
+                                      "enable) if [ -e '" + sandbox("enable-fails").toUtf8() +
+                                      "' ]; then echo 'Failed to enable unit: boom'; exit 1; fi;; esac\nexit 0\n";
+            if (!writeFile(fake, script))
+                qFatal("could not write %s", qPrintable(fake));
+            QFile::setPermissions(fake, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        }
 
         auto env = QProcessEnvironment::systemEnvironment();
         for (const char *name : {"WAYLAND_DISPLAY", "DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "QT_QPA_PLATFORMTHEME",
@@ -406,7 +960,12 @@ private:
         env.insert("TMPDIR", sandbox("tmp"));
         env.insert("HOME", sandbox("home"));
         env.insert("DBUS_SESSION_BUS_ADDRESS", "unix:path=" + sandbox("no-bus"));
-        env.insert("CLIPBOARD_SHARE_CTL_SOCK", sandbox("absent-ctl.sock"));
+        if (overrideSocket)
+            env.insert("NUDGE_CTL_SOCK", sandbox("absent-ctl.sock"));
+        else
+            env.remove("NUDGE_CTL_SOCK");
+        env.remove("CLIPBOARD_SHARE_CTL_SOCK");
+        env.insert("PATH", sandbox("bin") + ":" + env.value("PATH"));
 
         auto *process = new QProcess;
         process->setProcessEnvironment(env);

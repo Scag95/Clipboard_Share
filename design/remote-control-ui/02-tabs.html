@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pestañas por tarea</title>
+<style>
+  :root{--bg:#1A1A1E;--surface:#25252B;--line:#45454D;--text:#F5F5F7;--muted:#A8A8B3;--accent:#4FD1D5;--accent-d:#00696D;--ok:#5BD68A;}
+  *{box-sizing:border-box;margin:0}
+  body{background:#0e0e10;display:grid;place-items:center;min-height:100vh;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--text)}
+  .phone{width:412px;height:892px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
+  header{padding:18px 18px 12px;display:flex;align-items:center;justify-content:space-between}
+  header b{font-size:20px}
+  .state{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ok)}
+  .state i{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+  [role=tablist]{display:grid;grid-template-columns:repeat(3,1fr);margin:0 14px;background:var(--surface);border-radius:14px;padding:4px;border:1px solid var(--line)}
+  [role=tab]{height:44px;border:0;border-radius:10px;background:transparent;color:var(--muted);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+  [role=tab][aria-selected=true]{background:var(--accent-d);color:#fff}
+  [role=tab]:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .panel{flex:1;padding:14px;display:none;flex-direction:column;gap:12px;min-height:0}
+  .panel.on{display:flex}
+  .pad{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:20px;display:grid;place-items:center;color:var(--muted);font-size:13px;text-align:center;line-height:1.6}
+  .row{display:grid;gap:10px}
+  .two{grid-template-columns:1fr 1fr}
+  button.b{height:56px;border-radius:14px;border:1px solid var(--line);background:#2d2d34;color:var(--text);font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+  button.b.primary{background:var(--accent-d);border-color:transparent}
+  .keys{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .keys .b{height:52px;font-size:14px}
+  .arrows{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(2,52px);gap:8px;justify-content:center}
+  .arrows .up{grid-column:2}.arrows .l{grid-column:1;grid-row:2}.arrows .d{grid-column:2;grid-row:2}.arrows .r{grid-column:3;grid-row:2}
+  .arrows .b{height:100%}
+  .info{padding:14px;border:1px dashed var(--line);border-radius:14px;color:var(--muted);font-size:13.5px;line-height:1.5}
+  .card{padding:14px;border:1px solid var(--line);border-radius:16px;background:var(--surface);display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .card small{display:block;color:var(--muted);margin-top:3px;font-size:12.5px}
+  .sw{width:46px;height:28px;border-radius:14px;background:var(--accent-d);position:relative;border:0}
+  .sw::after{content:"";position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:#fff}
+  footer{padding:10px 14px 16px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center}
+  footer span{flex:1;font-size:13px;color:var(--muted)}
+  footer button{height:42px;padding:0 16px;border-radius:12px;border:1px solid #8a3b3b;background:transparent;color:#ff9b9b;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<main class="phone" aria-label="Control remoto">
+  <header><b>omarchy</b><span class="state"><i aria-hidden="true"></i>Conectado</span></header>
+
+  <div role="tablist" aria-label="Modo">
+    <button role="tab" id="t1" aria-selected="true" aria-controls="p1">Mouse</button>
+    <button role="tab" id="t2" aria-selected="false" aria-controls="p2" tabindex="-1">Teclado</button>
+    <button role="tab" id="t3" aria-selected="false" aria-controls="p3" tabindex="-1">Portapapeles</button>
+  </div>
+
+  <section class="panel on" id="p1" role="tabpanel" aria-labelledby="t1">
+    <div class="pad" tabindex="0" role="application" aria-label="Touchpad">Desliza para mover<br>Toca = clic · 2 dedos = scroll</div>
+    <div class="row two"><button class="b" type="button">Clic izquierdo</button><button class="b" type="button">Clic derecho</button></div>
+  </section>
+
+  <section class="panel" id="p2" role="tabpanel" aria-labelledby="t2" hidden>
+    <button class="b primary" type="button">⌨ Abrir teclado del celular</button>
+    <p class="info">Lo que escribas aparece directamente en la PC. Para borrar una selección, selecciónala en la PC y pulsa borrar.</p>
+    <div class="keys">
+      <button class="b" type="button">Ctrl+C</button><button class="b" type="button">Ctrl+V</button><button class="b" type="button">Ctrl+X</button><button class="b" type="button">Ctrl+Z</button>
+      <button class="b" type="button">Esc</button><button class="b" type="button">Enter</button><button class="b" type="button">Tab</button><button class="b" type="button">Supr</button>
+    </div>
+    <div class="arrows">
+      <button class="b up" type="button" aria-label="Arriba">↑</button><button class="b l" type="button" aria-label="Izquierda">←</button><button class="b d" type="button" aria-label="Abajo">↓</button><button class="b r" type="button" aria-label="Derecha">→</button>
+    </div>
+  </section>
+
+  <section class="panel" id="p3" role="tabpanel" aria-labelledby="t3" hidden>
+    <div class="card"><div>Sincronización de texto<small>Activa · hace 4 s</small></div><span style="color:var(--ok);font-size:13px">● Al día</span></div>
+    <div class="card"><div>Sincronizar imágenes<small>Puede consumir datos en redes lentas</small></div><button class="sw" role="switch" aria-checked="true" aria-label="Sincronizar imágenes"></button></div>
+  </section>
+
+  <footer><span>192.168.0.14:8765</span><button type="button">Soltar</button></footer>
+</main>
+<script>
+  const tabs=[...document.querySelectorAll('[role=tab]')];
+  function pick(t){tabs.forEach(x=>{const on=x===t;x.setAttribute('aria-selected',on);x.tabIndex=on?0:-1;const p=document.getElementById(x.getAttribute('aria-controls'));p.hidden=!on;p.classList.toggle('on',on)})}
+  tabs.forEach((t,i)=>{t.addEventListener('click',()=>pick(t));t.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){const n=tabs[(i+(e.key==='ArrowRight'?1:tabs.length-1))%tabs.length];pick(n);n.focus()}})});
+</script>
+</body>
+</html>

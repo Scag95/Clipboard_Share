@@ -3,6 +3,12 @@ package com.clipboardshare
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.graphics.Color
+import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
+import android.text.style.UnderlineSpan
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -10,7 +16,6 @@ import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
-import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -29,6 +34,7 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "ClipboardShareRemote"
+        const val TYPED_CARD_VISIBLE_MS = 3_000L
     }
 
     private val client = InputClient()
@@ -42,7 +48,10 @@ class RemoteControlActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var clipboardStatusText: TextView
-    private lateinit var textInput: EditText
+    private lateinit var keyboard: RemoteKeyboardView
+    private lateinit var statusBadge: Button
+    private lateinit var statusDot: View
+    private lateinit var connPanel: View
     private lateinit var connectButton: Button
     private lateinit var cancelPairingButton: Button
     private var retryScheduled = false
@@ -53,7 +62,10 @@ class RemoteControlActivity : AppCompatActivity() {
     private val clipboardStatusPoller = object : Runnable {
         override fun run() {
             if (::clipboardStatusText.isInitialized) {
-                clipboardStatusText.text = ClipboardSyncService.clipboardStatus
+                val clip = ClipboardSyncService.clipboardStatus
+                clipboardStatusText.text = clip
+                statusBadge.text = "⎘ $clip ▾"
+                statusDot.alpha = if (client.connected) 1f else 0.35f
             }
             clipboardStatusHandler.postDelayed(this, 500L)
         }
@@ -116,7 +128,31 @@ class RemoteControlActivity : AppCompatActivity() {
         setContentView(R.layout.activity_remote_control)
         statusText = findViewById(R.id.rcStatus)
         clipboardStatusText = findViewById(R.id.clipboardStatus)
-        textInput = findViewById(R.id.etText)
+        statusBadge = findViewById(R.id.btnStatusBadge)
+        statusDot = findViewById(R.id.rcDot)
+        connPanel = findViewById(R.id.connPanel)
+        findViewById<TextView>(R.id.rcHost).text =
+            store.getLastHosts().firstOrNull { SessionStore.hostKey(it.host, it.port) == hostKey }?.name
+                ?: hostKey
+        statusBadge.setOnClickListener {
+            connPanel.visibility = if (connPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        val moreShortcuts = findViewById<View>(R.id.moreShortcuts)
+        val moreButton = findViewById<Button>(R.id.btnMoreShortcuts)
+        moreButton.setOnClickListener {
+            val open = moreShortcuts.visibility != View.VISIBLE
+            moreShortcuts.visibility = if (open) View.VISIBLE else View.GONE
+            moreButton.text = if (open) "▾" else "▴"
+        }
+        keyboard = findViewById(R.id.remoteKeyboard)
+        keyboard.sink = object : KeyboardTranslator.Sink {
+            override fun text(chars: String) = sendOrWarn(client.sendText(chars))
+            override fun key(name: String) = sendOrWarn(client.sendKey(name))
+        }
+        val typedCard = findViewById<TextView>(R.id.typedCard)
+        keyboard.onPhraseChanged = { phrase -> showTypedPhrase(typedCard, phrase) }
+        watchSoftKeyboard()
+        findViewById<Button>(R.id.btnKeyboard).setOnClickListener { keyboard.show() }
         connectButton = findViewById(R.id.btnConnect)
         cancelPairingButton = findViewById(R.id.btnCancelPairing)
 
@@ -143,29 +179,17 @@ class RemoteControlActivity : AppCompatActivity() {
         bind(R.id.btnCtrlZ) { client.sendKey("z", listOf("ctrl")) }
         bind(R.id.btnEsc) { client.sendKey("esc") }
         bind(R.id.btnEnter) { client.sendKey("enter") }
+        bind(R.id.btnTab) { client.sendKey("tab") }
+        bind(R.id.btnDelete) { client.sendKey("delete") }
         bind(R.id.btnArrowLeft) { client.sendKey("arrowleft") }
         bind(R.id.btnArrowRight) { client.sendKey("arrowright") }
         bind(R.id.btnArrowUp) { client.sendKey("arrowup") }
         bind(R.id.btnArrowDown) { client.sendKey("arrowdown") }
 
-        bind(R.id.btnSendText) {
-            val chars = textInput.text.toString()
-            when {
-                chars.isEmpty() -> setStatus("Nada que enviar")
-                !client.sendText(chars) -> setStatus(
-                    if (client.connected) {
-                        "Texto demasiado largo o con caracteres de control: no se envió"
-                    } else {
-                        "Sin conexión: el texto no se envió"
-                    }
-                )
-                else -> textInput.setText("")
-            }
-        }
-
         connectButton.setOnClickListener { requestPairing(automatic = false) }
         cancelPairingButton.setOnClickListener { cancelPairing() }
         bind(R.id.btnDisconnect) {
+            connPanel.visibility = View.GONE
             manualDisconnect = true
             pairingJob?.cancel()
             pairingJob = null
@@ -214,6 +238,71 @@ class RemoteControlActivity : AppCompatActivity() {
         clipboardStatusHandler.removeCallbacksAndMessages(null)
         client.disconnect()
         super.onDestroy()
+    }
+
+    /** Latest words typed, with the one still being typed emphasised; it hides after a pause. */
+    private fun showTypedPhrase(card: TextView, phrase: String) {
+        card.removeCallbacks(hideTypedCard)
+        if (phrase.isEmpty()) {
+            card.visibility = View.GONE
+            return
+        }
+        val (finished, current) = PhraseView.split(phrase)
+        val text = SpannableString(finished + current)
+        if (current.isNotEmpty()) {
+            val start = finished.length
+            text.setSpan(ForegroundColorSpan(Color.rgb(245, 245, 247)), start, text.length, 0)
+            text.setSpan(StyleSpan(Typeface.BOLD), start, text.length, 0)
+            text.setSpan(UnderlineSpan(), start, text.length, 0)
+        }
+        card.text = text
+        card.visibility = View.VISIBLE
+        typedCardView = card
+        card.postDelayed(hideTypedCard, TYPED_CARD_VISIBLE_MS)
+    }
+
+    private var typedCardView: View? = null
+    /** Dismissing the card also forgets the phrase, so the next one starts empty. */
+    private val hideTypedCard = Runnable {
+        typedCardView?.visibility = View.GONE
+        keyboard.resetTyping()
+    }
+
+    /**
+     * With the soft keyboard open only the keyboard button gives way; the shortcuts
+     * stay usable and the readout floats above them, just over the keys.
+     */
+    private fun watchSoftKeyboard() {
+        val root = findViewById<View>(android.R.id.content)
+        val shortcuts = findViewById<View>(R.id.shortcutsPanel)
+        val keyboardButton = findViewById<View>(R.id.btnKeyboard)
+        val card = findViewById<View>(R.id.typedCard)
+        val screenPadding = (14 * resources.displayMetrics.density).toInt()
+        val gap = (8 * resources.displayMetrics.density).toInt()
+        root.viewTreeObserver.addOnGlobalLayoutListener {
+            val frame = android.graphics.Rect()
+            root.getWindowVisibleDisplayFrame(frame)
+            val hidden = root.rootView.height - frame.bottom
+            val open = hidden > root.rootView.height * 0.15f
+            val visibility = if (open) View.GONE else View.VISIBLE
+            if (keyboardButton.visibility != visibility) keyboardButton.visibility = visibility
+            // The card clears the shortcuts panel that sits above the keys.
+            val margin = if (open) screenPadding + shortcuts.height + gap + gap else screenPadding
+            val params = card.layoutParams as android.widget.FrameLayout.LayoutParams
+            if (params.bottomMargin != margin) {
+                params.bottomMargin = margin
+                card.layoutParams = params
+            }
+            if (!open && typedCardView?.visibility == View.VISIBLE) {
+                typedCardView?.removeCallbacks(hideTypedCard)
+                hideTypedCard.run()
+            }
+        }
+    }
+
+    private fun sendOrWarn(sent: Boolean): Boolean {
+        if (!sent) setStatus(if (client.connected) "No se pudo enviar la tecla" else "Sin conexión: la tecla no se envió")
+        return sent
     }
 
     private fun bind(id: Int, action: () -> Unit) {

@@ -42,7 +42,12 @@ class InputClient(
     fun connect(serverHttpUrl: String, token: String, listener: Listener) {
         if (ws != null) return
         val wsUrl = serverHttpUrl.replaceFirst("http", "ws") + "/ws/input?token=" + token
-        val request = Request.Builder().url(wsUrl).build()
+        val request = try {
+            Request.Builder().url(wsUrl).build()
+        } catch (e: IllegalArgumentException) {
+            listener.onDisconnected(e.message)
+            return
+        }
         ws = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 listener.onConnected()
@@ -137,8 +142,8 @@ object PairingClient {
     fun request(serverHttpUrl: String, deviceId: String, deviceName: String): RequestResult {
         val body = JSONObject().put("id", deviceId).put("name", deviceName).toString()
             .toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url("$serverHttpUrl/pair/request").post(body).build()
         return try {
+            val request = Request.Builder().url("$serverHttpUrl/pair/request").post(body).build()
             http.newCall(request).execute().use { resp ->
                 when (resp.code) {
                     200 -> {
@@ -159,10 +164,10 @@ object PairingClient {
     }
 
     fun status(serverHttpUrl: String, requestId: String): StatusResult {
-        val url = "$serverHttpUrl/pair/status".toHttpUrl().newBuilder()
-            .addQueryParameter("id", requestId).build()
-        val request = Request.Builder().url(url).get().build()
         return try {
+            val url = "$serverHttpUrl/pair/status".toHttpUrl().newBuilder()
+                .addQueryParameter("id", requestId).build()
+            val request = Request.Builder().url(url).get().build()
             http.newCall(request).execute().use { resp ->
                 // The server answers an expired request with HTTP 410 and
                 // {"state":"expired"}; both spellings map to Expired so the

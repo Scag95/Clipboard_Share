@@ -1,12 +1,15 @@
-# Maintainer: Clipboard Share contributors
-pkgname=clipboard-share
+# Maintainer: Nudge contributors
+pkgname=nudge
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Share the clipboard and remote input between phones and a Linux desktop'
 arch=('x86_64')
 license=('MIT')
-depends=('wl-clipboard' 'qt6-base' 'qt6-declarative' 'qt6-wayland')
+depends=('wl-clipboard' 'qt6-base' 'qt6-declarative' 'qt6-wayland' 'qt6-svg')
 makedepends=('go')
+provides=('clipboard-share')
+conflicts=('clipboard-share')
+replaces=('clipboard-share')
 options=('!lto')
 source=()
 
@@ -18,8 +21,9 @@ prepare() {
   # Copy only the sources needed to build; never build inside the repo tree.
   tar -C "$_repo" --exclude='panel/build' -cf - go.mod go.sum cmd internal panel \
     | tar -C "$srcdir/$pkgname" -xf -
-  # The panel resources reference ../../pkgbuild/clipboard-share.svg.
-  cp "$_repo/pkgbuild/clipboard-share.svg" "$srcdir/$pkgname/pkgbuild/"
+  # The panel resources reference ../../pkgbuild/nudge.svg, and its tests the
+  # packaged autostart entry.
+  cp "$_repo/pkgbuild/nudge.svg" "$_repo/pkgbuild/nudge-panel-autostart.desktop" "$srcdir/$pkgname/pkgbuild/"
 }
 
 build() {
@@ -29,23 +33,23 @@ build() {
   export CGO_CXXFLAGS="$CXXFLAGS"
   export CGO_LDFLAGS="$LDFLAGS"
   export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-  go build -o clipboard-share ./cmd/server
+  go build -o nudge ./cmd/server
 
   sh panel/bin/build
 }
 
 package() {
   cd "$srcdir/$pkgname"
-  install -Dm755 clipboard-share "$pkgdir/usr/bin/clipboard-share"
-  install -Dm755 panel/build/clipboard-share-panel "$pkgdir/usr/bin/clipboard-share-panel"
-  install -Dm644 "$startdir/clipboard-share.service" \
-    "$pkgdir/usr/lib/systemd/user/clipboard-share.service"
-  install -Dm644 "$startdir/99-clipboard-share-uinput.rules" \
-    "$pkgdir/usr/lib/udev/rules.d/99-clipboard-share-uinput.rules"
-  install -Dm644 "$startdir/clipboard-share.desktop" \
-    "$pkgdir/usr/share/applications/clipboard-share.desktop"
-  install -Dm644 "$startdir/clipboard-share-panel-autostart.desktop" \
-    "$pkgdir/etc/xdg/autostart/clipboard-share-panel.desktop"
-  install -Dm644 "$startdir/clipboard-share.svg" \
-    "$pkgdir/usr/share/icons/hicolor/scalable/apps/clipboard-share.svg"
+  install -Dm755 nudge "$pkgdir/usr/bin/nudge"
+  install -Dm755 panel/build/nudge-panel "$pkgdir/usr/bin/nudge-panel"
+  install -Dm644 "$startdir/nudge.service" \
+    "$pkgdir/usr/lib/systemd/user/nudge.service"
+  install -Dm644 "$startdir/99-nudge-uinput.rules" \
+    "$pkgdir/usr/lib/udev/rules.d/99-nudge-uinput.rules"
+  install -Dm644 "$startdir/nudge.desktop" \
+    "$pkgdir/usr/share/applications/nudge.desktop"
+  install -Dm644 "$startdir/nudge-panel-autostart.desktop" \
+    "$pkgdir/etc/xdg/autostart/nudge-panel.desktop"
+  install -Dm644 "$startdir/nudge.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/nudge.svg"
 }

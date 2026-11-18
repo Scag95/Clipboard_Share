@@ -5,7 +5,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 mkdir -p "$ROOT/build"
 cd "$ROOT/build"
 
-qmake6 "$ROOT/clipboard-share-panel.pro"
+qmake6 "$ROOT/nudge-panel.pro"
 make -j"$(nproc)"
 
-echo "Built $ROOT/build/clipboard-share-panel"
+echo "Built $ROOT/build/nudge-panel"

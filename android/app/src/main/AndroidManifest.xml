@@ -24,8 +24,8 @@
          como trabajo futuro para una versión pública). -->
     <application
         android:usesCleartextTraffic="true"
-        android:label="Clipboard Share"
-        android:icon="@drawable/ic_launcher"
+        android:label="Nudge"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
         <activity
             android:name=".MainActivity"
@@ -38,6 +38,7 @@
         <activity
             android:name=".RemoteControlActivity"
             android:exported="false"
+            android:windowSoftInputMode="adjustResize"
             android:label="Control remoto" />
         <activity
             android:name=".ClipboardReadActivity"

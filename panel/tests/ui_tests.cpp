@@ -2,7 +2,9 @@
 // window, a real Backend, and a fake control socket standing in for the server.
 // Asserts the commands the server receives, which is the observable effect.
 
+#include <QFileInfo>
 #include <QGuiApplication>
+#include <QImage>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
@@ -11,6 +13,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "autostart.h"
 #include "backend.h"
 #include "fakeserver.h"
 #include "theme.h"
@@ -20,16 +23,40 @@ using namespace fake;
 class UiTests : public QObject {
     Q_OBJECT
 
+    // Plays systemctl for the autostart switches: records and answers.
+    struct FakeSystemctl {
+        QList<QStringList> calls;
+        bool enabled = true;
+        int failCode = 0;
+        QString failOutput;
+        Autostart::Runner runner() {
+            return [this](const QStringList &args) -> Autostart::Result {
+                calls.append(args);
+                if (args.value(0) == "is-enabled")
+                    return {enabled ? 0 : 1, {}};
+                if (failCode != 0)
+                    return {failCode, failOutput};
+                enabled = args.value(0) == "enable" ? true : args.value(0) == "disable" ? false : enabled;
+                return {0, {}};
+            };
+        }
+    };
+
     struct Session {
         FakeServer server;
         Backend backend;
         Theme theme;
+        QTemporaryDir home;
+        FakeSystemctl systemctl;
+        Autostart autostart;
         QQmlApplicationEngine engine;
         QQuickWindow *window = nullptr;
         Session(const QString &path, std::function<void(FakeServer &)> setup, bool startHidden = false)
-            : server(path), backend((setup(server), path), 100), theme(path + ".theme") {
+            : server(path), backend((setup(server), path), 100), theme(path + ".theme"),
+              autostart(home.filePath("state"), home.filePath("xdg"), systemctl.runner()) {
             engine.rootContext()->setContextProperty("theme", &theme);
             engine.rootContext()->setContextProperty("backend", &backend);
+            engine.rootContext()->setContextProperty("autostart", &autostart);
             engine.rootContext()->setContextProperty("startHidden", startHidden);
             engine.load(QUrl("qrc:/Main.qml"));
             window = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0));
@@ -190,21 +217,108 @@ private slots:
         QVERIFY(!sawCommand(s.server, "revoke"));
     }
 
+    // The login switches drive systemctl and the XDG override, and spring back
+    // with the reason when a change fails.
+    void theSettingsSwitchesControlTheirAutostart() {
+        Session s(m_path, [](FakeServer &) {});
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, kPanelSwitch) != nullptr, 3000);
+        QQuickItem *panel = itemWithText(s.window, kPanelSwitch);
+        QQuickItem *server = itemWithText(s.window, kServerSwitch);
+        QVERIFY(server);
+        QVERIFY(panel->property("checked").toBool());
+        QVERIFY(server->property("checked").toBool());
+        const QString override = s.home.filePath("xdg/autostart/nudge-panel.desktop");
+
+        click(s.window, panel);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(override), 3000);
+        QFile written(override);
+        QVERIFY(written.open(QIODevice::ReadOnly));
+        QVERIFY(written.readAll().contains("\nHidden=true\n"));
+        QVERIFY(!panel->property("checked").toBool());
+
+        click(s.window, panel);
+        QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(override), 3000);
+        QVERIFY(panel->property("checked").toBool());
+
+        click(s.window, server);
+        QTRY_COMPARE_WITH_TIMEOUT(s.systemctl.calls.value(s.systemctl.calls.size() - 1),
+                                  (QStringList{"disable", Autostart::Unit}), 3000);
+        QVERIFY(!server->property("checked").toBool());
+        click(s.window, server);
+        QTRY_COMPARE_WITH_TIMEOUT(s.systemctl.calls.value(s.systemctl.calls.size() - 1),
+                                  (QStringList{"enable", Autostart::Unit}), 3000);
+        QVERIFY(server->property("checked").toBool());
+    }
+
+    void aFailingSwitchSpringsBackAndSaysWhy() {
+        Session s(m_path, [](FakeServer &) {});
+        s.systemctl.failCode = 1;
+        s.systemctl.failOutput = "Failed to disable unit: Access denied";
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, kServerSwitch) != nullptr, 3000);
+        QQuickItem *server = itemWithText(s.window, kServerSwitch);
+
+        click(s.window, server);
+
+        const QString error = "No se pudo desactivar el inicio del servidor: Failed to disable unit: Access denied";
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, error) != nullptr, 3000);
+        QVERIFY(server->property("checked").toBool());
+        QVERIFY(s.autostart.serverEnabled());
+    }
+
+    // A failed first-run enable stays visible in the Settings card (S10).
+    void aFailedFirstRunEnableIsShownInSettings() {
+        Session s(m_path, [](FakeServer &) {});
+        s.systemctl.enabled = false;
+        s.systemctl.failCode = 1;
+        s.systemctl.failOutput = "Failed to enable unit: boom";
+
+        s.autostart.applyFirstRunDefaults();
+
+        const QString error = "No se pudo activar el inicio del servidor: Failed to enable unit: boom";
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, error) != nullptr, 3000);
+        QVERIFY(!QFileInfo::exists(s.autostart.markerPath()));
+    }
+
+    // The app is called Nudge in the window and uses the Nudge icon (S1).
+    void theWindowAndIconSayNudge() {
+        Session s(m_path, [](FakeServer &) {});
+        QVERIFY(s.window);
+        QCOMPARE(s.window->title(), QString("Nudge"));
+
+        QImage icon(":/nudge.svg");
+        if (icon.isNull())
+            QSKIP("no SVG image plugin to render the icon");
+        icon = icon.scaled(108, 108).convertToFormat(QImage::Format_ARGB32);
+        // White cursor, teal background, transparent rounded corner.
+        const QColor cursor = icon.pixelColor(52, 50);
+        const QColor background = icon.pixelColor(54, 4);
+        QVERIFY2(cursor.red() > 240 && cursor.green() > 240 && cursor.blue() > 240, qPrintable(cursor.name()));
+        QVERIFY2(background.red() < 30 && background.green() > 80 && background.blue() > 80,
+                 qPrintable(background.name()));
+        QCOMPARE(icon.pixelColor(0, 0).alpha(), 0);
+    }
+
     void anUnreachableServerIsSaidInTheWindow() {
         Backend backend(m_dir.filePath("absent.sock"), 100);
         Theme theme(m_path + ".theme");
+        FakeSystemctl systemctl;
+        Autostart autostart(m_dir.filePath("state"), m_dir.filePath("xdg"), systemctl.runner());
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("theme", &theme);
         engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("autostart", &autostart);
         engine.rootContext()->setContextProperty("startHidden", false);
         engine.load(QUrl("qrc:/Main.qml"));
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0));
         QVERIFY(window);
 
         QTRY_VERIFY_WITH_TIMEOUT(itemWithText(window, "Server not running") != nullptr, 3000);
+        QVERIFY(itemWithText(window, "Start it with: systemctl --user start nudge") != nullptr);
     }
 
 private:
+    static constexpr const char *kServerSwitch = "Iniciar el servidor al iniciar sesión";
+    static constexpr const char *kPanelSwitch = "Abrir el panel al iniciar sesión";
     QTemporaryDir m_dir;
     QString m_path;
     int m_n = 0;

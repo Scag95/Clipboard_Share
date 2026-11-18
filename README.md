@@ -1,4 +1,6 @@
-# Clipboard Share
+# Nudge
+
+(Antes se llamaba Clipboard Share; ver “Migración desde clipboard-share”.)
 
 Compartir el clipboard (texto e imágenes) entre un PC con Windows o Linux y un
 móvil Android en la misma red WiFi, mediante descubrimiento automático
@@ -15,7 +17,7 @@ la nube. El móvil además puede manejar el mouse y el teclado del PC.
 ## Arquitectura
 
 - **Servidor en el PC (Go)**: expone una API HTTP local y se anuncia vía mDNS
-  (`_clipboard-share._tcp`) para que el móvil lo descubra automáticamente.
+  (`_nudge._tcp`) para que el móvil lo descubra automáticamente.
 - **Cliente Android**: descubre el servidor por mDNS, sincroniza el clipboard y
   hace de trackpad/teclado remoto.
 - **Panel de escritorio (Linux, Qt Quick)**: ventana + bandeja para aprobar
@@ -35,7 +37,7 @@ Clipboard_Share/
 │   └── pair/          # emparejamiento por identidad + socket de control
 ├── android/           # app Android (Kotlin)
 ├── panel/             # panel de escritorio Linux (C++ / Qt Quick) y sus tests
-├── pkgbuild/          # paquete Arch, servicio de usuario, launcher, ícono
+├── pkgbuild/          # paquete Arch `nudge`, servicio de usuario, launcher, ícono
 ├── odd/tasks/         # especificaciones de cada funcionalidad
 └── README.md
 ```
@@ -77,25 +79,55 @@ Dependencias Go (se descargan con `go mod tidy`):
 
 ## App de escritorio para Linux (panel + servicio)
 
-En Arch/Omarchy el servidor se instala como paquete: trae el servidor, un
-**panel gráfico** con ícono en la bandeja, el servicio de usuario con
-autostart, el ícono y la entrada del launcher (`Super + Space` → “Clipboard
-Share”).
+En Arch/Omarchy el servidor se instala como paquete `nudge`: trae el servidor
+y CLI (`nudge`), un **panel gráfico** (`nudge-panel`) con ícono en la bandeja,
+el servicio de usuario `nudge.service`, el ícono y la entrada del launcher
+(`Super + Space` → “Nudge”).
 
 ```bash
 cd pkgbuild && makepkg -f          # compila servidor + panel desde este árbol
-sudo pacman -U clipboard-share-*-x86_64.pkg.tar.zst
-systemctl --user enable --now clipboard-share                        # servidor
+sudo pacman -U nudge-*-x86_64.pkg.tar.zst
+nudge-panel                        # la primera vez activa el servidor al iniciar sesión
 ```
 
 `makepkg` necesita `go` como paquete de pacman; si Go lo tenés solo con `mise`,
 usá `mise exec go@1.24 -- makepkg -f --nodeps` (salta únicamente el chequeo de
 esa dependencia de compilación). Para cambiar el puerto:
-`systemctl --user edit clipboard-share` y definí
-`Environment=CLIPBOARD_SHARE_PORT=...`. El panel arranca con la sesión gracias
-al autostart que instala el paquete.
+`systemctl --user edit nudge` y definí `Environment=NUDGE_PORT=...` (los
+nombres viejos `CLIPBOARD_SHARE_*` siguen valiendo como respaldo).
 
-El panel (`clipboard-share-panel`) arranca solo con la sesión, oculto en la
+### Inicio automático
+
+En el panel, la tarjeta **Ajustes** tiene dos interruptores independientes,
+los dos encendidos después de instalar:
+
+- **Iniciar el servidor al iniciar sesión**: `systemctl --user enable` /
+  `disable nudge.service`. El panel lo activa una sola vez, en su primer
+  arranque; si lo apagás, queda apagado.
+- **Abrir el panel al iniciar sesión**: autostart XDG. Apagarlo escribe
+  `~/.config/autostart/nudge-panel.desktop` con `Hidden=true`, que anula la
+  entrada del paquete (`/etc/xdg/autostart/nudge-panel.desktop`); encenderlo
+  borra ese archivo.
+
+Abrir el panel siempre arranca el servidor si no está corriendo
+(`systemctl --user start nudge.service`), diga lo que diga el primer
+interruptor. Si un cambio falla, la tarjeta muestra el motivo.
+
+### Migración desde clipboard-share
+
+El paquete `nudge` reemplaza a `clipboard-share` (`replaces`/`conflicts`/
+`provides`). Antes de actualizar, apagá el servicio viejo:
+`systemctl --user disable --now clipboard-share`. Al primer arranque, el
+**servidor** mueve `~/.config/clipboard-share` a `~/.config/nudge` (si este
+último no existe todavía), así los teléfonos emparejados siguen funcionando;
+un `~/.config/nudge` existente nunca se sobrescribe. El CLI y el panel no
+mueven nada: usan `~/.config/nudge` si existe y, si no, el directorio viejo.
+Si el servidor no puede moverlo, sigue trabajando con el directorio viejo y
+no se pierde ningún emparejamiento. Durante la transición el servidor anuncia
+el servicio mDNS nuevo (`_nudge._tcp`) y el viejo (`_clipboard-share._tcp`), y
+la app de Android busca los dos.
+
+El panel (`nudge-panel`) arranca solo con la sesión, oculto en la
 bandeja; cuando un teléfono pide emparejarse, **la bandeja avisa** (clic en el
 aviso o en el ícono abre el panel). La ventana nunca se abre sola ni toma foco:
 cualquiera en la LAN puede mandar una solicitud, y aprobar es siempre un clic
@@ -104,13 +136,13 @@ deliberado en el botón:
 - **Aprobar / Rechazar** cada solicitud (caducan a los 90 s).
 - **Revocar** un dispositivo emparejado (pide confirmación).
 - Estado del servidor; si no corre, lo dice y sugiere
-  `systemctl --user start clipboard-share`.
+  `systemctl --user start nudge`.
 - Teclas: `?` ayuda, `Esc` oculta a la bandeja, `Q` sale. Clic en el ícono de
   la bandeja muestra/oculta la ventana. No hay atajo de teclado para aprobar.
 
 El paquete también instala una regla udev para `/dev/uinput` (ver “Permisos
 uinput”). Detalles del paquete en `pkgbuild/README.md`. Sin paquete, se puede
-probar el panel a mano: `panel/bin/build && panel/build/clipboard-share-panel`;
+probar el panel a mano: `panel/bin/build && panel/build/nudge-panel`;
 sus tests corren con `panel/bin/test` (Qt Test, offscreen).
 
 ## Uso (servidor PC)
@@ -132,13 +164,14 @@ sudo usermod -aG input "$USER"   # y volver a iniciar sesión
 
 El log de arranque dice qué modo está activo (`input: uinput injector active`
 o el stub de registro). El paquete instala además una regla con `uaccess`
-(`pkgbuild/99-clipboard-share-uinput.rules`) pensada para dar acceso al usuario
+(`pkgbuild/99-nudge-uinput.rules`) pensada para dar acceso al usuario
 con sesión activa sin el grupo; **no está verificada**: en la máquina de
 desarrollo el ACL de `/dev/uinput` no mostró ninguna entrada para el usuario y
 el acceso venía del grupo `input`.
 
-El servidor escucha en `:8765` (configurable con `CLIPBOARD_SHARE_PORT`) y se
-anuncia en la red local como `_clipboard-share._tcp`.
+El servidor escucha en `:8765` (configurable con `NUDGE_PORT`; también
+`CLIPBOARD_SHARE_PORT` como respaldo) y se anuncia en la red local como
+`_nudge._tcp`.
 
 Endpoints:
 
@@ -182,26 +215,26 @@ El server puede recibir input del teléfono (especificación en
    tocar **Aprobar**. El CLI sigue disponible para scripts:
 
    ```bash
-   clipboard-share pair --last   # aprueba el request más nuevo
-   clipboard-share pair list     # ver pendientes y aprobados
-   clipboard-share pair revoke --device <id>   # quitar un dispositivo
+   nudge pair --last   # aprueba el request más nuevo
+   nudge pair list     # ver pendientes y aprobados
+   nudge pair revoke --device <id>   # quitar un dispositivo
    ```
 
 3. El celu guarda el token y abre `/ws/input`. **Las reconexiones siguientes
    son automáticas**: el server reconoce el UUID del dispositivo y re-emite
    token sin aprobación; el estado (dispositivos y tokens) persiste en
-   `~/.config/clipboard-share/state.json` (`0600`) y sobrevive reinicios del
+   `~/.config/nudge/state.json` (`0600`) y sobrevive reinicios del
    server y de la PC.
 
 Atajo opcional para Hyprland (`~/.config/hypr/hyprland.conf`) que aprueba sin
 abrir el panel:
 
 ```ini
-bind = SUPER SHIFT, P, exec, clipboard-share pair --last
+bind = SUPER SHIFT, P, exec, nudge pair --last
 ```
 
 Si se pierde un teléfono: **Revocar** en el panel (o
-`clipboard-share pair revoke --device <id>`); para resetear todo el pairing,
+`nudge pair revoke --device <id>`); para resetear todo el pairing,
 borrar `state.json`.
 
 En Windows la inyección usa `SendInput` (sin cgo, build tag `windows`); en
@@ -216,10 +249,10 @@ panel nunca la aprueba solo ni abre su ventana por ella.
 
 ```bash
 # Windows (desde Linux, sin cgo):
-GOOS=windows go build -o clipboard-share.exe ./cmd/server
+GOOS=windows go build -o nudge.exe ./cmd/server
 
 # Linux nativo:
-go build -o clipboard-share ./cmd/server
+go build -o nudge ./cmd/server
 ```
 
 ## Generar APK (beta personal)
@@ -250,8 +283,8 @@ adb shell pm grant com.clipboardshare android.permission.READ_LOGS
 adb shell appops set com.clipboardshare SYSTEM_ALERT_WINDOW allow
 ```
 
-Además Android muestra, al abrir la app, el diálogo **"¿Permitir que Clipboard
-Share acceda a todos los registros del dispositivo?"**: elegí *Permitir acceso
+Además Android muestra, al abrir la app, el diálogo **"¿Permitir que Nudge
+acceda a todos los registros del dispositivo?"**: elegí *Permitir acceso
 por única vez*. Es un consentimiento tuyo sobre datos sensibles y solo puede
 aceptarse con la app abierta; si el sistema lo vuelve a pedir (reinicio del
 celu o del proceso), aceptalo de nuevo.
@@ -284,8 +317,9 @@ propio para no abrir la ventana de lectura tras cada copia que llega de la PC.
   aprobación en el PC (sin PIN), estado persistido, stream WebSocket con
   validación estricta y límites de tasa; `SendInput` en Windows y `uinput` en
   Linux.
-- Panel de escritorio para Linux (Qt Quick) con bandeja, paquete Arch, servicio
-  de usuario con autostart, ícono y entrada de launcher. Verificado instalando
+- Panel de escritorio para Linux (Qt Quick) con bandeja, paquete Arch `nudge`,
+  servicio de usuario, interruptores de inicio automático (servidor y panel),
+  ícono y entrada de launcher. Verificado instalando
   el paquete: el servicio arranca, se reinicia solo si cae y el panel lo ve.
 - Cliente Android: home con lista de hosts (vivos + recordados), tokens por
   host con reconexión transparente, sincronización bidireccional de texto e
@@ -298,7 +332,8 @@ propio para no abrir la ventana de lectura tras cada copia que llega de la PC.
   - Go: `go test ./...` (`internal/api`, `internal/clipboard`, `internal/input`,
     `internal/pair`).
   - Panel: `panel/bin/test` (Qt Test offscreen: backend contra un servidor
-    falso, UI con clics y teclas reales, instancia única).
+    falso, UI con clics y teclas reales, instancia única, inicio automático
+    con un `systemctl` falso y directorios temporales).
   - Android: `cd android && ./gradlew testDebugUnitTest` (JUnit sobre la lógica
     de disparo del sync en segundo plano).
 - Conocido y sin resolver: el clipboard HTTP no está autenticado; el sync celu →

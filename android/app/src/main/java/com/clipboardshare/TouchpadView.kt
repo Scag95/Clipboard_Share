@@ -1,6 +1,8 @@
 package com.clipboardshare
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -33,6 +35,15 @@ class TouchpadView @JvmOverloads constructor(
     private val tapMs = 300L
     private val twoFingerTapMs = 500L
 
+    private val stripPx = 52.8f * resources.displayMetrics.density
+    private var edgeScroll = false
+    private val railPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF8A8A96.toInt()
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
     private var primaryId = -1
     private var activeCount = 0
     private var lastX = 0f
@@ -55,7 +66,7 @@ class TouchpadView @JvmOverloads constructor(
     }
 
     init {
-        setBackgroundResource(R.drawable.trackpad_surface)
+        if (background == null) setBackgroundResource(R.drawable.trackpad_surface)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -73,12 +84,14 @@ class TouchpadView @JvmOverloads constructor(
                 consumed = false
                 scrollAccumX = 0f
                 scrollAccumY = 0f
-                postDelayed(longPressRunnable, longPressMs)
+                edgeScroll = EdgeScroll.inStrip(event.x, width, stripPx)
+                if (!edgeScroll) postDelayed(longPressRunnable, longPressMs)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 activeCount = event.pointerCount
                 if (activeCount >= 2) {
+                    edgeScroll = false
                     twoFinger = true
                     gestureWasTwo = true
                     removeCallbacks(longPressRunnable)
@@ -117,6 +130,16 @@ class TouchpadView @JvmOverloads constructor(
                     val dy = y - lastY
                     lastX = x
                     lastY = y
+                    if (edgeScroll) {
+                        // Same direction as the two-finger scroll.
+                        scrollAccumY += dy
+                        val ny = (scrollAccumY / notchPx).toInt()
+                        if (ny != 0) {
+                            listener?.onScroll(0, ny)
+                            scrollAccumY -= ny * notchPx
+                        }
+                        return true
+                    }
                     if (dx != 0f || dy != 0f) {
                         listener?.onMove(dx.toInt(), dy.toInt())
                         // One finger still moving after a two-finger gesture is
@@ -146,7 +169,7 @@ class TouchpadView @JvmOverloads constructor(
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPressRunnable)
                 val dur = System.currentTimeMillis() - downTime
-                if (!consumed) {
+                if (!consumed && !edgeScroll) {
                     when {
                         gestureWasTwo && dur < twoFingerTapMs && twoFingerMove <= slop -> {
                             listener?.onRightTap()
@@ -182,7 +205,24 @@ class TouchpadView @JvmOverloads constructor(
         return floatArrayOf(sx / n, sy / n)
     }
 
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        // Laptop-style scroll hint: a thin line with a chevron at each end.
+        val d = resources.displayMetrics.density
+        val cx = width - stripPx / 2f
+        val top = height * 0.06f
+        val bottom = height * 0.94f
+        val chev = 5f * d
+        railPaint.strokeWidth = 1.5f * d
+        canvas.drawLine(cx, top + chev, cx, bottom - chev, railPaint)
+        canvas.drawLine(cx - chev, top + chev * 0.5f, cx, top - chev * 0.5f, railPaint)
+        canvas.drawLine(cx, top - chev * 0.5f, cx + chev, top + chev * 0.5f, railPaint)
+        canvas.drawLine(cx - chev, bottom - chev * 0.5f, cx, bottom + chev * 0.5f, railPaint)
+        canvas.drawLine(cx, bottom + chev * 0.5f, cx + chev, bottom - chev * 0.5f, railPaint)
+    }
+
     private fun resetState() {
+        edgeScroll = false
         activeCount = 0
         twoFinger = false
         totalMove = 0f

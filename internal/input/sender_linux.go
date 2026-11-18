@@ -240,7 +240,7 @@ func (d *uinputDevice) setup() error {
 	}
 
 	setup := uinputSetup{ID: linuxInputID{BusType: 0x03, Vendor: 1, Product: 1, Version: 1}}
-	copy(setup.Name[:], "clipboard-share")
+	copy(setup.Name[:], "nudge")
 	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uiDevSetup, uintptr(unsafe.Pointer(&setup)))
 	if errno != 0 {
 		return fmt.Errorf("UI_DEV_SETUP: %w", errno)

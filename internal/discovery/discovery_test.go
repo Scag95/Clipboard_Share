@@ -1,0 +1,95 @@
+package discovery
+
+import (
+	"errors"
+	"reflect"
+	"strconv"
+	"testing"
+)
+
+func TestServiceTypes(t *testing.T) {
+	if ServiceType != "_nudge._tcp" {
+		t.Fatalf("ServiceType = %q, want _nudge._tcp", ServiceType)
+	}
+	if LegacyServiceType != "_clipboard-share._tcp" {
+		t.Fatalf("LegacyServiceType = %q, want _clipboard-share._tcp", LegacyServiceType)
+	}
+}
+
+type fakeRegistry struct {
+	calls    []string
+	fail     map[string]error
+	shutdown []string
+}
+
+func (f *fakeRegistry) install(t *testing.T) {
+	t.Helper()
+	prev := register
+	register = func(name, service string, port int) (func(), error) {
+		f.calls = append(f.calls, name+"|"+service+"|"+strconv.Itoa(port))
+		if err := f.fail[service]; err != nil {
+			return nil, err
+		}
+		return func() { f.shutdown = append(f.shutdown, service) }, nil
+	}
+	t.Cleanup(func() { register = prev })
+}
+
+func TestAnnounceRegistersBothTypesAndShutsBothDown(t *testing.T) {
+	f := &fakeRegistry{}
+	f.install(t)
+	stop, err := Announce("omarchy", "8765")
+	if err != nil {
+		t.Fatalf("Announce error: %v", err)
+	}
+	want := []string{"omarchy|_nudge._tcp|8765", "omarchy|_clipboard-share._tcp|8765"}
+	if !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("registrations = %q, want %q", f.calls, want)
+	}
+	if len(f.shutdown) != 0 {
+		t.Fatalf("shut down early: %q", f.shutdown)
+	}
+	stop()
+	if len(f.shutdown) != 2 {
+		t.Fatalf("shutdown = %q, want both types", f.shutdown)
+	}
+}
+
+func TestAnnounceContinuesWhenLegacyFails(t *testing.T) {
+	f := &fakeRegistry{fail: map[string]error{LegacyServiceType: errors.New("legacy boom")}}
+	f.install(t)
+	stop, err := Announce("omarchy", "8765")
+	if err != nil || stop == nil {
+		t.Fatalf("Announce = (stop set: %v), %v; want primary only", stop != nil, err)
+	}
+	stop()
+	if !reflect.DeepEqual(f.shutdown, []string{ServiceType}) {
+		t.Fatalf("shutdown = %q, want primary only", f.shutdown)
+	}
+}
+
+func TestAnnounceFailsWhenPrimaryFails(t *testing.T) {
+	boom := errors.New("primary boom")
+	f := &fakeRegistry{fail: map[string]error{ServiceType: boom}}
+	f.install(t)
+	stop, err := Announce("omarchy", "8765")
+	if !errors.Is(err, boom) || stop != nil {
+		t.Fatalf("Announce = (stop set: %v), %v; want nil, primary error", stop != nil, err)
+	}
+	if len(f.shutdown) != 0 || len(f.calls) != 1 {
+		t.Fatalf("calls = %q, shutdown = %q; want only the failed primary attempt", f.calls, f.shutdown)
+	}
+}
+
+func TestAnnounceRejectsBadPort(t *testing.T) {
+	f := &fakeRegistry{}
+	f.install(t)
+	for _, port := range []string{"", "0", "70000", "x"} {
+		if _, err := Announce("n", port); err == nil {
+			t.Errorf("port %q accepted", port)
+		}
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("registered despite bad port: %q", f.calls)
+	}
+}

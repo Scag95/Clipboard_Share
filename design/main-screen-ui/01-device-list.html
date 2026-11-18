@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lista de dispositivos</title>
+<style>
+  :root{--bg:#1A1A1E;--surface:#25252B;--line:#45454D;--text:#F5F5F7;--muted:#A8A8B3;--accent:#4FD1D5;--accent-d:#00696D;--ok:#5BD68A;}
+  *{box-sizing:border-box;margin:0}
+  body{background:#0e0e10;display:grid;place-items:center;min-height:100vh;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--text)}
+  .phone{width:412px;height:892px;background:var(--bg);padding:22px 16px;display:flex;flex-direction:column;gap:18px}
+  h1{font-size:26px;letter-spacing:-.01em}
+  .head{display:flex;flex-direction:column;gap:10px}
+  .bar{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .rescan{flex:none;height:44px;padding:0 16px;border-radius:22px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:14px;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+  .rescan:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .rescan:disabled{color:var(--muted);cursor:default}
+  .rescan:disabled .ri{animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .scan.idle{animation:none;background:var(--line)}
+  .sub{color:var(--muted);font-size:14px;display:flex;align-items:center;gap:8px}
+  .scan{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.25}}
+  @media (prefers-reduced-motion:reduce){.scan,.rescan:disabled .ri{animation:none}}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:600;margin-bottom:8px}
+  .card{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:16px;border-radius:18px;border:1px solid var(--line);background:var(--surface);color:inherit;font:inherit;cursor:pointer;margin-bottom:10px}
+  .card:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .ico{width:44px;height:44px;border-radius:12px;background:#2f2f37;display:grid;place-items:center;font-size:22px;flex:none}
+  .body{flex:1;min-width:0}
+  .body b{display:block;font-size:17px}
+  .body span{font-size:13px;color:var(--muted)}
+  .chip{font-size:12.5px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .chip.on{color:var(--ok);border-color:rgba(91,214,138,.4);background:rgba(91,214,138,.08)}
+  .card.off{opacity:.78}
+  .foot{margin-top:auto;border:1px dashed var(--line);border-radius:14px;padding:14px;color:var(--muted);font-size:13px;line-height:1.5}
+</style>
+</head>
+<body>
+<main class="phone">
+  <header class="head">
+    <h1>Clipboard Share</h1>
+    <div class="bar">
+      <p class="sub" role="status"><span class="scan" id="dot" aria-hidden="true"></span><span id="state">Buscando dispositivos en tu red…</span></p>
+      <button class="rescan" type="button" id="rescan"><span class="ri" aria-hidden="true">↻</span><span id="rlabel">Buscar de nuevo</span></button>
+    </div>
+  </header>
+
+  <section aria-labelledby="live">
+    <h2 id="live">En tu red</h2>
+    <button class="card" type="button">
+      <span class="ico" aria-hidden="true">🖥</span>
+      <span class="body"><b>omarchy</b><span>192.168.0.14 · conectado hace 2 min</span></span>
+      <span class="chip on">En red</span>
+    </button>
+  </section>
+
+  <section aria-labelledby="mem">
+    <h2 id="mem">Recordados</h2>
+    <button class="card off" type="button">
+      <span class="ico" aria-hidden="true">💻</span>
+      <span class="body"><b>Portátil de la oficina</b><span>Visto ayer · toca para reintentar</span></span>
+      <span class="chip">Sin respuesta</span>
+    </button>
+  </section>
+
+  <p class="foot">Los dispositivos aparecen solos cuando el PC con Clipboard Share está encendido y en la misma red wifi.</p>
+</main>
+<script>
+  const b=document.getElementById('rescan'),st=document.getElementById('state'),dot=document.getElementById('dot'),lb=document.getElementById('rlabel');
+  function search(){b.disabled=true;lb.textContent='Buscando…';dot.classList.remove('idle');st.textContent='Buscando dispositivos en tu red…';
+    setTimeout(()=>{b.disabled=false;lb.textContent='Buscar de nuevo';dot.classList.add('idle');st.textContent='1 dispositivo en red · actualizado ahora'},3000)}
+  b.addEventListener('click',search);search();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "07-tarjeta-con-frase.html",
+  "handoffs": {
+    "07-tarjeta-con-frase.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-18T18:30:10.351Z",
+      "startedAt": "2026-11-18T18:30:14.339Z",
+      "implementedAt": "2026-11-18T18:31:07.951Z",
+      "note": "Tarjeta flotante sobre el teclado implementada y vista en el celular con el teclado abierto (commit 1c18808)."
+    }
+  }
+}

@@ -1,4 +1,4 @@
-module clipboard-share
+module nudge
 
 go 1.24
 

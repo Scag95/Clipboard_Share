@@ -1,0 +1,62 @@
+{
+  "title": "Feedback de la palabra escrita",
+  "brief": "Cómo mostrar en el celular lo que se escribe con el teclado estilo PC, con el teclado de Android abierto y sin campo de texto; el recuadro actual encima del botón Teclado queda tapado por el teclado",
+  "artboards": [
+    {
+      "file": "01-barra-sobre-teclado.html",
+      "title": "Barra sobre el teclado",
+      "tradeoff": "Siempre visible porque va pegada al teclado y no la tapa; ocupa una franja fija de altura",
+      "width": 412,
+      "height": 892
+    },
+    {
+      "file": "02-chip-sobre-touchpad.html",
+      "title": "Chip sobre el touchpad",
+      "tradeoff": "Limpio: aparece solo mientras escribes y se desvanece; la palabra desaparece si te distraes un segundo",
+      "width": 412,
+      "height": 892
+    },
+    {
+      "file": "03-texto-fantasma.html",
+      "title": "Texto fantasma",
+      "tradeoff": "Muy grande y legible sin ocupar espacio extra; compite visualmente con el touchpad y se pierde si tocas encima",
+      "width": 412,
+      "height": 892
+    },
+    {
+      "file": "04-frase-en-cabecera.html",
+      "title": "Frase en la cabecera",
+      "tradeoff": "Muestra el contexto (las últimas palabras) y no ocupa el touchpad; el texto es pequeño y queda lejos del teclado",
+      "width": 412,
+      "height": 892
+    },
+    {
+      "file": "05-pildora-flotante.html",
+      "title": "Píldora flotante",
+      "tradeoff": "Compacta y centrada justo sobre el teclado; la palabra se ve sin tapar el touchpad, pero tapa una pequeña franja de él",
+      "width": 412,
+      "height": 892
+    },
+    {
+      "file": "06-burbuja-de-tecla.html",
+      "title": "Burbuja de tecla",
+      "tradeoff": "Imita la vista previa de tecla del teclado de Android: instantánea y familiar, pero solo muestra la última letra, no la palabra",
+      "width": 412,
+      "height": 892
+    },
+    {
+      "file": "07-tarjeta-con-frase.html",
+      "title": "Tarjeta con frase",
+      "tradeoff": "Da contexto: las últimas palabras con la actual resaltada; es más ancha y tapa más touchpad",
+      "width": 412,
+      "height": 892
+    },
+    {
+      "file": "08-pildora-con-rastro.html",
+      "title": "Píldora con rastro",
+      "tradeoff": "Palabra actual destacada y las dos anteriores atenuadas a su izquierda; da ritmo y contexto sin ser una tarjeta, pero con palabras largas se aprieta",
+      "width": 412,
+      "height": 892
+    }
+  ]
+}

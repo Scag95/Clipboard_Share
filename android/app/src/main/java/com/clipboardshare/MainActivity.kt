@@ -1,6 +1,8 @@
 package com.clipboardshare
 
 import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,9 +11,13 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.text.format.DateUtils
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -24,20 +30,44 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
+/**
+ * mDNS types the home screen browses: the current Nudge type and the
+ * pre-rename one, so servers that have not been updated are still found.
+ */
+internal object ServiceTypes {
+    const val PRIMARY = "_nudge._tcp."
+    const val LEGACY = "_clipboard-share._tcp."
+    val ALL = listOf(PRIMARY, LEGACY)
+
+    fun isKnown(serviceType: String?): Boolean {
+        val type = serviceType?.removeSuffix(".") ?: return false
+        return ALL.any { it.removeSuffix(".") == type }
+    }
+}
+
 /** Home inventory: every live NSD service plus previously selected hosts. */
 class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "ClipboardShare"
-        const val SERVICE_TYPE = "_clipboard-share._tcp."
         const val NOTIFICATION_PERMISSION_REQUEST = 1001
+        const val SEARCH_WINDOW_MS = 4_000L
     }
 
     private lateinit var nsdManager: NsdManager
-    private lateinit var discoveryListener: NsdManager.DiscoveryListener
+    /** One listener per entry of [ServiceTypes.ALL]; NSD browses one type each. */
+    private var discoveryListeners = emptyList<NsdManager.DiscoveryListener>()
+    private var failedDiscoveries = 0
     private lateinit var store: SessionStore
     private lateinit var hostList: LinearLayout
     private lateinit var statusText: TextView
+    private lateinit var scanDot: View
+    private lateinit var rescanButton: Button
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private var scanAnimator: ObjectAnimator? = null
+    private var searching = true
+    private var discoveryError = false
+    private var liveCount = 0
 
     /** Services are aggregated by name; resolving one never replaces another. */
     private val discoveredServices = linkedMapOf<String, NsdServiceInfo>()
@@ -54,23 +84,105 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        // The layout carries its own title; the themed action bar would repeat it.
+        supportActionBar?.hide()
         store = SessionStore(this)
         hostList = findViewById(R.id.hostList)
         statusText = findViewById(R.id.statusText)
+        scanDot = findViewById(R.id.scanDot)
+        rescanButton = findViewById(R.id.btnRescan)
+        rescanButton.setOnClickListener { rescan() }
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
         if (store.selectedHost != null) startClipboardSync()
         renderHosts()
         startDiscovery()
+        beginSearchState()
     }
 
+    /** Restarts NSD discovery from scratch; remembered hosts stay in the list. */
+    private fun rescan() {
+        stopDiscovery()
+        discoveredServices.clear()
+        resolvingServices.clear()
+        renderHosts()
+        startDiscovery()
+        beginSearchState()
+    }
+
+    private fun beginSearchState() {
+        searching = true
+        discoveryError = false
+        uiHandler.removeCallbacks(endSearchRunnable)
+        uiHandler.postDelayed(endSearchRunnable, SEARCH_WINDOW_MS)
+        updateStatus()
+    }
+
+    private val endSearchRunnable = Runnable {
+        searching = false
+        updateStatus()
+    }
+
+    private fun updateStatus() {
+        statusText.text = when {
+            discoveryError -> "No se pudo buscar dispositivos en la red"
+            searching -> "Buscando dispositivos en tu red…"
+            liveCount == 0 -> "Ningún dispositivo en red"
+            liveCount == 1 -> "1 dispositivo en red"
+            else -> "$liveCount dispositivos en red"
+        }
+        rescanButton.isEnabled = !searching
+        rescanButton.text = if (searching) "Buscando…" else "↻ Buscar de nuevo"
+        rescanButton.setTextColor(if (searching) Color.rgb(168, 168, 179) else Color.rgb(245, 245, 247))
+        if (searching && scanAnimator == null) {
+            scanAnimator = ObjectAnimator.ofFloat(scanDot, View.ALPHA, 1f, 0.25f).apply {
+                duration = 800
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                start()
+            }
+        } else if (!searching) {
+            scanAnimator?.cancel()
+            scanAnimator = null
+            scanDot.alpha = if (discoveryError) 0.35f else 0.6f
+        }
+    }
+
+    private fun stopDiscovery() {
+        for (listener in discoveryListeners) {
+            try {
+                nsdManager.stopServiceDiscovery(listener)
+            } catch (_: Exception) {
+            }
+        }
+        discoveryListeners = emptyList()
+    }
+
+    /** The screen reports a discovery error only when every type failed to start. */
+    private fun onDiscoveryStartFailed() {
+        failedDiscoveries++
+        if (failedDiscoveries < ServiceTypes.ALL.size) return
+        discoveryError = true
+        searching = false
+        updateStatus()
+    }
+
+    /**
+     * Browses every type in [ServiceTypes.ALL]. Hosts stay keyed by service
+     * name, so a server announcing both types is listed once.
+     */
     private fun startDiscovery() {
-        discoveryListener = object : NsdManager.DiscoveryListener {
+        failedDiscoveries = 0
+        discoveryListeners = ServiceTypes.ALL.map { type -> startDiscovery(type) }
+    }
+
+    private fun startDiscovery(type: String): NsdManager.DiscoveryListener {
+        val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String) {
                 Log.d(TAG, "Discovery started: $regType")
             }
 
             override fun onServiceFound(service: NsdServiceInfo) {
-                if (service.serviceType.removeSuffix(".") != SERVICE_TYPE.removeSuffix(".")) return
+                if (!ServiceTypes.isKnown(service.serviceType)) return
                 runOnUiThread {
                     if (!resolvingServices.add(service.serviceName)) return@runOnUiThread
                     nsdManager.resolveService(service, object : NsdManager.ResolveListener {
@@ -80,10 +192,10 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         override fun onServiceResolved(si: NsdServiceInfo) {
-                            Log.d(TAG, "Resolved: ${si.serviceName} ${si.host}:${si.port}")
+                            Log.d(TAG, "Resolved: ${si.serviceName} ${si.host}:${si.port} all=${if (Build.VERSION.SDK_INT >= 34) si.hostAddresses else null}")
                             runOnUiThread {
                                 resolvingServices.remove(si.serviceName)
-                                if (si.host?.hostAddress != null && si.port > 0) {
+                                if (si.port > 0) {
                                     discoveredServices[si.serviceName] = si
                                     renderHosts()
                                 }
@@ -107,13 +219,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Log.e(TAG, "Start discovery failed: $errorCode")
-                runOnUiThread {
-                    if (hostList.childCount == 0) {
-                        statusText.visibility = View.VISIBLE
-                        statusText.text = "No se pudo buscar dispositivos en la red"
-                    }
-                }
+                Log.e(TAG, "Start discovery failed for $serviceType: $errorCode")
+                runOnUiThread { onDiscoveryStartFailed() }
             }
 
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
@@ -122,66 +229,116 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             nsdManager.discoverServices(
-                SERVICE_TYPE,
+                type,
                 NsdManager.PROTOCOL_DNS_SD,
-                discoveryListener,
+                listener,
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Cannot start discovery", e)
-            statusText.text = "No se pudo buscar dispositivos en la red"
+            Log.e(TAG, "Cannot start discovery for $type", e)
+            onDiscoveryStartFailed()
         }
+        return listener
     }
 
     private fun renderHosts() {
+        val rememberedAll = store.getLastHosts()
         val live = discoveredServices.mapNotNull { (name, service) ->
-            val host = service.host?.hostAddress ?: return@mapNotNull null
+            // NSD sometimes resolves only a link-local address; the same service
+            // is still on the network, so fall back to the address remembered for it.
+            val host = pickAddress(service)
+                ?: rememberedAll.firstOrNull { it.name == name && it.port == service.port }?.host
+                ?: run {
+                    Log.w(TAG, "No usable address for $name")
+                    return@mapNotNull null
+                }
             SessionStore.LastHost(name, host, service.port, 0L)
         }.sortedBy { it.name.lowercase() }
         val liveKeys = live.mapTo(mutableSetOf()) { SessionStore.hostKey(it.host, it.port) }
         val liveNames = live.mapTo(mutableSetOf()) { it.name }
-        val remembered = store.getLastHosts()
+        val remembered = rememberedAll
             .filter { SessionStore.hostKey(it.host, it.port) !in liveKeys && it.name !in liveNames }
             .sortedByDescending { it.lastConnected }
 
         hostList.removeAllViews()
-        live.forEach { host -> hostList.addView(createHostRow(host, live = true)) }
-        remembered.forEach { host -> hostList.addView(createHostRow(host, live = false)) }
-        statusText.visibility = if (live.isEmpty() && remembered.isEmpty()) View.VISIBLE else View.GONE
-        if (live.isEmpty() && remembered.isEmpty()) {
-            statusText.text = "Buscando dispositivos…"
+        liveCount = live.size
+        if (live.isNotEmpty()) {
+            hostList.addView(sectionHeader("En tu red"))
+            live.forEach { host -> hostList.addView(createHostRow(host, live = true)) }
         }
+        if (remembered.isNotEmpty()) {
+            hostList.addView(sectionHeader("Recordados"))
+            remembered.forEach { host -> hostList.addView(createHostRow(host, live = false)) }
+        }
+        if (::rescanButton.isInitialized) updateStatus()
+    }
+
+    private fun sectionHeader(title: String): View = TextView(this).apply {
+        text = title.uppercase()
+        textSize = 12f
+        letterSpacing = 0.1f
+        setTextColor(Color.rgb(168, 168, 179))
+        setPadding(dp(2), dp(6), 0, dp(8))
     }
 
     private fun createHostRow(host: SessionStore.LastHost, live: Boolean): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            setBackgroundResource(R.drawable.trackpad_surface)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setBackgroundResource(R.drawable.bg_card)
+            alpha = if (live) 1f else 0.8f
             isClickable = true
             isFocusable = true
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = dp(8) }
+            ).apply { bottomMargin = dp(10) }
         }
         row.addView(
             TextView(this).apply {
-                text = host.name
-                textSize = 17f
-                setTextColor(Color.rgb(245, 245, 247))
-                layoutParams = LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1f,
+                text = if (live) "🖥" else "💻"
+                textSize = 22f
+                gravity = Gravity.CENTER
+                setBackgroundResource(R.drawable.bg_icon_box)
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) }
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+        )
+        val detail = if (live || host.lastConnected <= 0L) {
+            host.host
+        } else {
+            "Visto " + DateUtils.getRelativeTimeSpanString(
+                host.lastConnected, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS,
+            ).toString().lowercase() + " · toca para reintentar"
+        }
+        row.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                addView(
+                    TextView(context).apply {
+                        text = host.name
+                        textSize = 17f
+                        setTextColor(Color.rgb(245, 245, 247))
+                        setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    }
+                )
+                addView(
+                    TextView(context).apply {
+                        text = detail
+                        textSize = 13f
+                        setTextColor(Color.rgb(168, 168, 179))
+                    }
                 )
             }
         )
         row.addView(
             TextView(this).apply {
-                text = if (live) "en red" else "sin respuesta"
-                textSize = 14f
-                setTextColor(if (live) Color.rgb(128, 203, 196) else Color.rgb(176, 176, 182))
+                text = if (live) "En red" else "Sin respuesta"
+                textSize = 12.5f
+                setTextColor(if (live) Color.rgb(91, 214, 138) else Color.rgb(168, 168, 179))
+                setBackgroundResource(if (live) R.drawable.bg_chip_on else R.drawable.bg_chip)
+                setPadding(dp(10), dp(6), dp(10), dp(6))
             }
         )
         row.setOnClickListener {
@@ -240,13 +397,17 @@ class MainActivity : AppCompatActivity() {
         ClipboardSyncService.ensureStarted(this)
     }
 
-    private fun serverUrl(host: SessionStore.LastHost): String {
-        val address = if (host.host.contains(':') && !host.host.startsWith("[")) {
-            "[${host.host}]"
+    private fun serverUrl(host: SessionStore.LastHost): String =
+        HostAddress.serverUrl(host.host, host.port)
+
+    @Suppress("DEPRECATION")
+    private fun pickAddress(service: NsdServiceInfo): String? {
+        val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            service.hostAddresses
         } else {
-            host.host
+            listOfNotNull(service.host)
         }
-        return "http://$address:${host.port}"
+        return HostAddress.pick(addresses)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -262,10 +423,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        try {
-            nsdManager.stopServiceDiscovery(discoveryListener)
-        } catch (_: Exception) {
-        }
+        uiHandler.removeCallbacksAndMessages(null)
+        scanAnimator?.cancel()
+        stopDiscovery()
         super.onDestroy()
     }
 }

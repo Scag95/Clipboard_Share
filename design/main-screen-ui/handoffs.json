@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "01-device-list.html",
+  "handoffs": {
+    "01-device-list.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-18T17:52:23.009Z",
+      "startedAt": null,
+      "implementedAt": "2026-11-18T17:54:40.237Z",
+      "note": "Implementado en Android: MainActivity + activity_main.xml, verificado en el celular (lista, chip En red, Buscar de nuevo)."
+    }
+  }
+}

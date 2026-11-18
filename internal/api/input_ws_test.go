@@ -12,8 +12,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 
-	"clipboard-share/internal/input"
-	"clipboard-share/internal/pair"
+	"nudge/internal/input"
+	"nudge/internal/pair"
 )
 
 func newInputServer(t *testing.T, rate int) (url string, b *pair.Broker, rec *input.Recorder) {

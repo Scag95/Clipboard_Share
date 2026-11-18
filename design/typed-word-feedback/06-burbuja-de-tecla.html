@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Burbuja de tecla</title>
+<style>
+:root{--bg:#1A1A1E;--surface:#25252B;--line:#45454D;--text:#F5F5F7;--muted:#A8A8B3;--accent:#4FD1D5;--accent-d:#00696D}
+*{box-sizing:border-box;margin:0}
+body{background:#0e0e10;display:grid;place-items:center;min-height:100vh;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--text)}
+.phone{width:412px;height:892px;background:var(--bg);display:flex;flex-direction:column;position:relative;overflow:hidden}
+.top{padding:14px 14px 0;display:flex;align-items:center;gap:10px}
+.dot{width:9px;height:9px;border-radius:50%;background:#5BD68A}
+.top b{flex:1;font-size:16px}
+.badge{height:36px;padding:0 12px;border-radius:18px;border:1px solid var(--line);background:var(--surface);font-size:12.5px;display:grid;place-items:center}
+.line{padding:6px 16px 0;font-size:12.5px;color:var(--muted);min-height:24px;display:flex;align-items:center;gap:6px}
+.padwrap{flex:1;margin:10px 14px 10px;min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:20px;background:#222228;overflow:hidden;position:relative}
+.surface{flex:1;position:relative}
+.rail{position:absolute;right:26px;top:6%;bottom:6%;width:1.5px;background:#8A8A96;border-radius:1px}
+.rail::before,.rail::after{content:"";position:absolute;left:-4px;width:8px;height:8px;border:solid #8A8A96;border-width:1.5px 1.5px 0 0}
+.rail::before{top:-4px;transform:rotate(-45deg)}.rail::after{bottom:-4px;transform:rotate(135deg)}
+.clicks{height:56px;display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}
+.clicks i{background:#2d2d34}.clicks i+i{border-left:1px solid var(--line)}
+.kb{background:#2b2b31;border-top:1px solid var(--line);padding:8px 6px 14px;display:grid;gap:7px}
+.kb div{display:flex;gap:5px;justify-content:center}
+.kb span{flex:1;max-width:36px;height:46px;border-radius:7px;background:#3b3b43;display:grid;place-items:center;font-size:18px}
+.kb .w{max-width:none;flex:4}
+.fl{position:absolute;left:0;right:0;bottom:246px;display:flex;justify-content:center;pointer-events:none;}.row{display:flex;align-items:flex-end;gap:10px}.bub{width:68px;height:78px;border-radius:18px 18px 18px 6px;background:var(--accent-d);display:grid;place-items:center;font-size:40px;font-weight:700;box-shadow:0 10px 26px rgba(0,0,0,.5);transition:transform .08s}.bub.pop{transform:scale(1.12)}.wd{padding:10px 18px;border-radius:16px;background:rgba(37,37,43,.96);border:1px solid var(--line);font-size:22px;color:var(--muted);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl}@media (prefers-reduced-motion:reduce){.bub{transition:none}}</style></head><body>
+<main class="phone" aria-label="Control remoto con teclado abierto">
+ <div class="top"><span class="dot"></span><b>omarchy</b><span class="badge">⎘ Sincronización activa ▾</span></div>
+ <div class="line" id="line">Conectado a 192.168.0.14</div>
+ <div class="padwrap"><div class="surface" id="surface"><span class="rail" aria-hidden="true"></span></div><div class="clicks"><i></i><i></i></div></div>
+ <div class="fl"><div class="row"><div class="bub" id="bb" aria-hidden="true"></div><div class="wd" id="wd" role="status" aria-live="polite"></div></div></div>
+ <div class="kb" aria-hidden="true">
+  <div><span>q</span><span>w</span><span>e</span><span>r</span><span>t</span><span>y</span><span>u</span><span>i</span><span>o</span><span>p</span></div>
+  <div><span>a</span><span>s</span><span>d</span><span>f</span><span>g</span><span>h</span><span>j</span><span>k</span><span>l</span><span>ñ</span></div>
+  <div><span>⇧</span><span>z</span><span>x</span><span>c</span><span>v</span><span>b</span><span>n</span><span>m</span><span>⌫</span></div>
+  <div><span>?123</span><span class="w">espacio</span><span>↵</span></div>
+ </div>
+</main>
+<script>
+let word="hol",phrase="Quedamos mañana a las nueve, hol";
+const $=id=>document.getElementById(id);
+function render(){ const b=$("bb");b.textContent=word.slice(-1)||"";b.style.visibility=word?"visible":"hidden";b.classList.add("pop");setTimeout(()=>b.classList.remove("pop"),90);$("wd").textContent=word;$("wd").style.visibility=word?"visible":"hidden" }
+document.addEventListener('keydown',e=>{
+ if(e.ctrlKey||e.metaKey||e.altKey)return;
+ if(e.key==='Backspace'){word=word.slice(0,-1);phrase=phrase.slice(0,-1)}
+ else if(e.key===' '||e.key==='Enter'){word="";phrase+=e.key===' '?' ':' ↵ '}
+ else if(e.key.length===1){word+=e.key;phrase+=e.key}
+ else return;
+ phrase=phrase.slice(-60);render();e.preventDefault();
+});
+render();
+</script></body></html>
