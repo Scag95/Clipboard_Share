@@ -1,0 +1,9 @@
+{
+  "title": "Pantalla principal",
+  "brief": "Rediseño de la pantalla principal de Clipboard Share (lista de dispositivos del PC, estados en red / sin respuesta / buscando), manteniendo el tema oscuro y el acento teal de la pantalla remota",
+  "artboards": [
+    { "file": "01-device-list.html", "title": "Lista de dispositivos", "tradeoff": "Cercano a lo actual y fácil de escanear; no destaca un dispositivo ni muestra el estado de la sincronización", "width": 412, "height": 892 },
+    { "file": "02-primary-device.html", "title": "Dispositivo principal", "tradeoff": "Un toque para conectar al PC habitual; los otros dispositivos quedan relegados", "width": 412, "height": 892 },
+    { "file": "03-status-first.html", "title": "Estado primero", "tradeoff": "Hace visible si la sincronización en segundo plano funciona (permisos, último envío); más información antes de llegar al dispositivo", "width": 412, "height": 892 }
+  ]
+}
