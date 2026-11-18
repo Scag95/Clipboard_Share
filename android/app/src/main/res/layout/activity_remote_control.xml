@@ -139,6 +139,7 @@
 
         <!-- Shortcuts: four frequent ones, the rest in an expandable section -->
         <LinearLayout
+            android:id="@+id/shortcutsPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
@@ -284,22 +285,6 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- The word being typed, so there is feedback without a text field -->
-        <TextView
-            android:id="@+id/typedWord"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/bg_card"
-            android:ellipsize="start"
-            android:gravity="center"
-            android:paddingEnd="14dp"
-            android:paddingStart="14dp"
-            android:singleLine="true"
-            android:text="Palabra actual"
-            android:textColor="#A8A8B3"
-            android:textSize="20sp" />
-
         <Button
             android:id="@+id/btnKeyboard"
             android:layout_width="match_parent"
@@ -369,4 +354,24 @@
             android:textAllCaps="false"
             android:textColor="#FF9B9B" />
     </LinearLayout>
+    <!-- Floating readout of what is being typed, above the soft keyboard -->
+    <TextView
+        android:id="@+id/typedCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="12dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginStart="14dp"
+        android:background="@drawable/bg_card"
+        android:elevation="10dp"
+        android:lineSpacingMultiplier="1.15"
+        android:maxLines="3"
+        android:paddingBottom="12dp"
+        android:paddingEnd="16dp"
+        android:paddingStart="16dp"
+        android:paddingTop="12dp"
+        android:textColor="#A8A8B3"
+        android:textSize="19sp"
+        android:visibility="gone" />
 </FrameLayout>

@@ -20,12 +20,31 @@ class KeyboardTranslator(private val sink: Sink) {
     var onWordChanged: ((String) -> Unit)? = null
     private var lastReported = ""
 
+    /** The most recent text typed, for the floating readout; cleared when the PC cursor may have moved. */
+    private val phrase = StringBuilder()
+    val currentPhrase: String get() = phrase.toString()
+    var onPhraseChanged: ((String) -> Unit)? = null
+    private var lastPhrase = ""
+
     private fun reportWord() {
         val now = word.toString()
         if (now != lastReported) {
             lastReported = now
             onWordChanged?.invoke(now)
         }
+        val text = phrase.toString()
+        if (text != lastPhrase) {
+            lastPhrase = text
+            onPhraseChanged?.invoke(text)
+        }
+    }
+
+    private fun trimPhrase() {
+        val extra = phrase.length - MAX_PHRASE
+        if (extra <= 0) return
+        var cut = extra
+        if (Character.isLowSurrogate(phrase[cut])) cut++
+        phrase.delete(0, cut)
     }
 
     fun commit(text: CharSequence): Boolean {
@@ -55,10 +74,19 @@ class KeyboardTranslator(private val sink: Sink) {
     }
 
     fun pressKey(name: String): Boolean {
+        // The keyboard's delete key arrives here as a key event; it must still shorten the readout.
+        if (name == "backspace") return deleteBefore(1)
         composing = ""
         word.setLength(0)
+        if (name == "enter") {
+            phrase.append(ENTER_MARK)
+            trimPhrase()
+        } else {
+            phrase.setLength(0)
+        }
+        val ok = sink.key(name)
         reportWord()
-        return sink.key(name)
+        return ok
     }
 
     /** Erases the tail of the old composition that differs, then types the new tail. */
@@ -79,6 +107,7 @@ class KeyboardTranslator(private val sink: Sink) {
         repeat(n) {
             ok = sink.key("backspace") && ok
             if (word.isNotEmpty()) word.setLength(word.offsetByCodePoints(word.length, -1))
+            if (phrase.isNotEmpty()) phrase.setLength(phrase.offsetByCodePoints(phrase.length, -1))
         }
         return ok
     }
@@ -93,15 +122,17 @@ class KeyboardTranslator(private val sink: Sink) {
         }
         for (ch in text) {
             when {
-                ch == '\n' -> { flush(); word.setLength(0); ok = sink.key("enter") && ok }
+                ch == '\n' -> { flush(); word.setLength(0); phrase.append(ENTER_MARK); ok = sink.key("enter") && ok }
                 ch.code < 0x20 || ch.code == 0x7f -> Unit
                 else -> {
                     run.append(ch)
+                    phrase.append(ch)
                     if (Character.isWhitespace(ch)) word.setLength(0) else word.append(ch)
                 }
             }
         }
         flush()
+        trimPhrase()
         return ok
     }
 
@@ -120,5 +151,7 @@ class KeyboardTranslator(private val sink: Sink) {
     companion object {
         const val MAX_TEXT_CODE_POINTS = 1000
         const val MAX_BACKSPACES = 100
+        const val MAX_PHRASE = 120
+        const val ENTER_MARK = '\u21B5'
     }
 }

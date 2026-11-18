@@ -137,4 +137,46 @@ class KeyboardTranslatorTest {
         translator.pressKey("arrowleft")
         assertEquals(listOf("ab", ""), seen)
     }
+
+    @Test fun phraseKeepsEverythingTypedAndWordIsItsLastToken() {
+        translator.commit("hola mundo")
+        assertEquals("hola mundo", translator.currentPhrase)
+        assertEquals("mundo", translator.currentWord)
+    }
+
+    @Test fun backspaceKeyEventShortensTheWordAndPhraseInsteadOfResettingThem() {
+        translator.commit("hola")
+        translator.pressKey("backspace")
+        assertEquals("hol", translator.currentWord)
+        assertEquals("hol", translator.currentPhrase)
+        assertEquals("key:backspace", sent.last())
+    }
+
+    @Test fun enterIsMarkedInThePhraseAndEndsTheWord() {
+        translator.commit("hola")
+        translator.pressKey("enter")
+        assertEquals("hola" + KeyboardTranslator.ENTER_MARK, translator.currentPhrase)
+        assertEquals("", translator.currentWord)
+    }
+
+    @Test fun cursorKeysDropThePhraseBecauseThePcCursorMoved() {
+        translator.commit("hola mundo")
+        translator.pressKey("arrowleft")
+        assertEquals("", translator.currentPhrase)
+    }
+
+    @Test fun phraseKeepsOnlyTheMostRecentCharacters() {
+        translator.commit("x".repeat(KeyboardTranslator.MAX_PHRASE + 30) + "fin")
+        assertEquals(KeyboardTranslator.MAX_PHRASE, translator.currentPhrase.length)
+        assertTrue(translator.currentPhrase.endsWith("fin"))
+    }
+
+    @Test fun phraseListenerIsToldWhenItChanges() {
+        val seen = mutableListOf<String>()
+        translator.onPhraseChanged = { seen += it }
+        translator.commit("a b")
+        translator.deleteBefore(1)
+        translator.pressKey("arrowleft")
+        assertEquals(listOf("a b", "a ", ""), seen)
+    }
 }

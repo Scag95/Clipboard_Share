@@ -4,6 +4,11 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.graphics.Color
+import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
+import android.text.style.UnderlineSpan
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -143,11 +148,9 @@ class RemoteControlActivity : AppCompatActivity() {
             override fun text(chars: String) = sendOrWarn(client.sendText(chars))
             override fun key(name: String) = sendOrWarn(client.sendKey(name))
         }
-        val typedWord = findViewById<TextView>(R.id.typedWord)
-        keyboard.onWordChanged = { word ->
-            typedWord.text = word.ifEmpty { "Palabra actual" }
-            typedWord.setTextColor(if (word.isEmpty()) Color.rgb(168, 168, 179) else Color.rgb(245, 245, 247))
-        }
+        val typedCard = findViewById<TextView>(R.id.typedCard)
+        keyboard.onPhraseChanged = { phrase -> showTypedPhrase(typedCard, phrase) }
+        watchSoftKeyboard()
         findViewById<Button>(R.id.btnKeyboard).setOnClickListener { keyboard.show() }
         connectButton = findViewById(R.id.btnConnect)
         cancelPairingButton = findViewById(R.id.btnCancelPairing)
@@ -234,6 +237,43 @@ class RemoteControlActivity : AppCompatActivity() {
         clipboardStatusHandler.removeCallbacksAndMessages(null)
         client.disconnect()
         super.onDestroy()
+    }
+
+    /** Latest words typed, with the one still being typed emphasised. */
+    private fun showTypedPhrase(card: TextView, phrase: String) {
+        if (phrase.isEmpty()) {
+            card.visibility = View.GONE
+            return
+        }
+        val (finished, current) = PhraseView.split(phrase)
+        val text = SpannableString(finished + current)
+        if (current.isNotEmpty()) {
+            val start = finished.length
+            text.setSpan(ForegroundColorSpan(Color.rgb(245, 245, 247)), start, text.length, 0)
+            text.setSpan(StyleSpan(Typeface.BOLD), start, text.length, 0)
+            text.setSpan(UnderlineSpan(), start, text.length, 0)
+        }
+        card.text = text
+        card.visibility = View.VISIBLE
+    }
+
+    /**
+     * With the soft keyboard open the shortcuts and the keyboard button give way,
+     * so the touchpad keeps its room and the readout floats just above the keys.
+     */
+    private fun watchSoftKeyboard() {
+        val root = findViewById<View>(android.R.id.content)
+        val shortcuts = findViewById<View>(R.id.shortcutsPanel)
+        val keyboardButton = findViewById<View>(R.id.btnKeyboard)
+        root.viewTreeObserver.addOnGlobalLayoutListener {
+            val frame = android.graphics.Rect()
+            root.getWindowVisibleDisplayFrame(frame)
+            val hidden = root.rootView.height - frame.bottom
+            val open = hidden > root.rootView.height * 0.15f
+            val visibility = if (open) View.GONE else View.VISIBLE
+            if (shortcuts.visibility != visibility) shortcuts.visibility = visibility
+            if (keyboardButton.visibility != visibility) keyboardButton.visibility = visibility
+        }
     }
 
     private fun sendOrWarn(sent: Boolean): Boolean {

@@ -31,6 +31,11 @@ class RemoteKeyboardView @JvmOverloads constructor(
         get() = translator.onWordChanged
         set(value) { translator.onWordChanged = value }
 
+    /** Called with the recent phrase (empty when none), on the main thread. */
+    var onPhraseChanged: ((String) -> Unit)?
+        get() = translator.onPhraseChanged
+        set(value) { translator.onPhraseChanged = value }
+
     init {
         isFocusable = true
         isFocusableInTouchMode = true
