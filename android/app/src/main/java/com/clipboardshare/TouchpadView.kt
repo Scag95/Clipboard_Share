@@ -36,9 +36,11 @@ class TouchpadView @JvmOverloads constructor(
     private val tapMs = 300L
     private val twoFingerTapMs = 500L
 
-    private val stripPx = 44f * resources.displayMetrics.density
+    private val stripPx = 52.8f * resources.displayMetrics.density
     private var edgeScroll = false
     private val stripPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF45454D.toInt() }
+    private val panelPaint = Paint().apply { color = 0x1AFFFFFF }
+    private val dividerPaint = Paint().apply { color = 0xFF45454D.toInt() }
     private val stripRect = RectF()
 
     private var primaryId = -1
@@ -204,10 +206,14 @@ class TouchpadView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // A faint rail on the right edge hints at the scroll strip.
-        val barW = 4f * resources.displayMetrics.density
+        // The scroll strip fills the full height: a faint panel, a divider and a rail.
+        val density = resources.displayMetrics.density
+        val left = width - stripPx
+        canvas.drawRect(left, 0f, width.toFloat(), height.toFloat(), panelPaint)
+        canvas.drawRect(left, 0f, left + density, height.toFloat(), dividerPaint)
+        val barW = 4f * density
         val cx = width - stripPx / 2f
-        stripRect.set(cx - barW / 2f, height * 0.2f, cx + barW / 2f, height * 0.8f)
+        stripRect.set(cx - barW / 2f, height * 0.1f, cx + barW / 2f, height * 0.9f)
         canvas.drawRoundRect(stripRect, barW / 2f, barW / 2f, stripPaint)
     }
 
