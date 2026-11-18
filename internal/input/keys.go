@@ -78,14 +78,3 @@ func IsExtended(name string) bool {
 func ModVK(name string) uint16 {
 	return modifierKeys[strings.ToLower(name)]
 }
-
-// ModifierOrder returns the mods to press (in order) and release (reverse).
-func normalizeMods(mods []string) []uint16 {
-	out := make([]uint16, 0, len(mods))
-	for _, m := range mods {
-		if vk := ModVK(m); vk != 0 {
-			out = append(out, vk)
-		}
-	}
-	return out
-}
