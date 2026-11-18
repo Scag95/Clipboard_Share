@@ -80,12 +80,14 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         override fun onServiceResolved(si: NsdServiceInfo) {
-                            Log.d(TAG, "Resolved: ${si.serviceName} ${si.host}:${si.port}")
+                            Log.d(TAG, "Resolved: ${si.serviceName} ${si.host}:${si.port} all=${if (Build.VERSION.SDK_INT >= 34) si.hostAddresses else null}")
                             runOnUiThread {
                                 resolvingServices.remove(si.serviceName)
-                                if (si.host?.hostAddress != null && si.port > 0) {
+                                if (pickAddress(si) != null && si.port > 0) {
                                     discoveredServices[si.serviceName] = si
                                     renderHosts()
+                                } else {
+                                    Log.w(TAG, "No usable address for ${si.serviceName}")
                                 }
                             }
                         }
@@ -134,7 +136,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderHosts() {
         val live = discoveredServices.mapNotNull { (name, service) ->
-            val host = service.host?.hostAddress ?: return@mapNotNull null
+            val host = pickAddress(service) ?: return@mapNotNull null
             SessionStore.LastHost(name, host, service.port, 0L)
         }.sortedBy { it.name.lowercase() }
         val liveKeys = live.mapTo(mutableSetOf()) { SessionStore.hostKey(it.host, it.port) }
@@ -240,13 +242,17 @@ class MainActivity : AppCompatActivity() {
         ClipboardSyncService.ensureStarted(this)
     }
 
-    private fun serverUrl(host: SessionStore.LastHost): String {
-        val address = if (host.host.contains(':') && !host.host.startsWith("[")) {
-            "[${host.host}]"
+    private fun serverUrl(host: SessionStore.LastHost): String =
+        HostAddress.serverUrl(host.host, host.port)
+
+    @Suppress("DEPRECATION")
+    private fun pickAddress(service: NsdServiceInfo): String? {
+        val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            service.hostAddresses
         } else {
-            host.host
+            listOfNotNull(service.host)
         }
-        return "http://$address:${host.port}"
+        return HostAddress.pick(addresses)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
