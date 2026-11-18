@@ -55,7 +55,7 @@ class TouchpadView @JvmOverloads constructor(
     }
 
     init {
-        if (background == null) setBackgroundResource(R.drawable.trackpad_surface)
+        setBackgroundResource(R.drawable.trackpad_surface)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

@@ -1,20 +1,18 @@
 package com.clipboardshare
 
 import android.app.Activity
-import android.content.Context
-import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.widget.Toast
 
 /**
- * Transparent, UI-less activity opened by the "Enviar portapapeles" Quick Settings tile
- * or notification action. Android 10+ lets only the focused app read the clipboard, so
- * this window reads it once it has focus, hands the content to the sync service and
- * finishes. Sending to the PC happens in the service after this window is gone, so a
- * slow or unreachable PC can never keep a full-screen window over the user's touches.
+ * Transparent, UI-less activity that exists for a fraction of a second. Android 10+
+ * lets only the focused app read the clipboard, so when the service detects a copy
+ * made elsewhere it brings this window to the front, reads the clipboard while it
+ * has focus and finishes. Only the read needs focus: sending to the PC happens in the
+ * service, after this window is gone, so a slow or unreachable PC can never keep a
+ * full-screen window over the user's touches.
  */
 class ClipboardReadActivity : Activity() {
 
@@ -25,7 +23,10 @@ class ClipboardReadActivity : Activity() {
         super.onCreate(savedInstanceState)
         // Hard cap that is never cancelled: whatever happens (no focus, service gone,
         // a slow clipboard provider), this window closes.
-        handler.postDelayed({ finishQuietly("closed (time limit)") }, READ_WINDOW_LIMIT_MS)
+        handler.postDelayed(
+            { finishQuietly("closed (time limit)") },
+            ClipboardTriggerPolicy.READ_WINDOW_LIMIT_MS,
+        )
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -34,21 +35,16 @@ class ClipboardReadActivity : Activity() {
         handled = true
         val service = ClipboardSyncService.instance
         if (service == null) {
-            Toast.makeText(
-                this,
-                ClipboardSendOutcome.NO_SYNC.statusText(""),
-                Toast.LENGTH_SHORT,
-            ).show()
             finishQuietly("abort (service not running)")
             return
         }
         // The callback fires as soon as the clipboard has been read, before any network.
-        service.captureLocalClipAndSend { runOnUiThread { finishQuietly(null) } }
+        service.captureLocalClipAndSync { runOnUiThread { finishQuietly(null) } }
     }
 
     private fun finishQuietly(reason: String?) {
         if (isFinishing) return
-        if (reason != null) Log.d(TAG, "manual send: $reason")
+        if (reason != null) Log.d(TAG, "bg read: $reason")
         finish()
         @Suppress("DEPRECATION")
         overridePendingTransition(0, 0)
@@ -56,18 +52,11 @@ class ClipboardReadActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        ClipboardSyncService.readActivityFinished()
         super.onDestroy()
     }
 
-    companion object {
-        private const val TAG = "ClipboardShare"
-
-        /** Hard cap on how long this window may stay on screen. */
-        private const val READ_WINDOW_LIMIT_MS = 3_000L
-
-        /** Intent that opens the read window from a tile, notification or service. */
-        fun intent(context: Context): Intent =
-            Intent(context, ClipboardReadActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+    private companion object {
+        const val TAG = "ClipboardShare"
     }
 }

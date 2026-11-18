@@ -15,12 +15,15 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
 import android.provider.MediaStore
 import android.util.Log
-import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -50,9 +53,6 @@ class ClipboardSyncService : Service() {
         private const val POLL_MS = 2_000L
         private const val DISCONNECTED_FAILURES = 3
 
-        /** Same label as the Quick Settings tile (see AndroidManifest). */
-        private const val SEND_ACTION_LABEL = "Enviar portapapeles"
-
         /** Process-local state read by the remote screen without a second sync loop. */
         @Volatile
         var clipboardStatus: String = "Sincronización inactiva"
@@ -74,10 +74,17 @@ class ClipboardSyncService : Service() {
 
         private fun appVisible(): Boolean = visibleActivities.get() > 0
 
-        /** The live service, so the transient read activity can hand it the clipboard. */
+        /** The live service, so the transient read activity can ask it to sync right now. */
         @Volatile
         var instance: ClipboardSyncService? = null
             private set
+
+        /** Called by ClipboardReadActivity when its window is gone. */
+        fun readActivityFinished() {
+            instance?.onReadActivityFinished()
+        }
+
+        // Timing constants and their required order are documented in ClipboardTriggerPolicy.
 
         fun ensureStarted(context: Context) {
             val appContext = context.applicationContext
@@ -123,10 +130,29 @@ class ClipboardSyncService : Service() {
     @Volatile private var consecutiveNetworkFailures = 0
     @Volatile private var notificationConnected = true
 
-    /** Serializes every clipboard step: the poll, the clip listener and the manual send. */
+    /** Serializes every runSync: the poll, the clip listener and the background read. */
     private val syncMutex = Mutex()
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val triggerPolicy = ClipboardTriggerPolicy(clock = SystemClock::elapsedRealtime)
+
+    /** Guards logWatcher and logWatcherThread; a thread that is no longer current must stop. */
+    private val logWatcherLock = Any()
+    private var logWatcher: Process? = null
+    private var logWatcherThread: Thread? = null
+    @Volatile private var readLogsMissingLogged = false
+
+    /** Pending fallback release of the read guard; replaced per read, cancelled on finish. */
+    private val readGraceLock = Any()
+    private var readGraceRunnable: Runnable? = null
+
+    /** Fires a copy that was deferred because it happened inside the own-write quiet window. */
+    private val quietWindowEnded = Runnable {
+        if (triggerPolicy.takeDeferredTrigger()) {
+            Log.d(TAG, "bg trigger: copy made during the quiet window")
+            onClipboardChangeDetected()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -162,6 +188,7 @@ class ClipboardSyncService : Service() {
             Log.d(TAG, "Clipboard sync started for $selectedHost")
             startClipListener()
             startSyncLoop()
+            startLogWatcher()
         }
         return START_STICKY
     }
@@ -171,7 +198,8 @@ class ClipboardSyncService : Service() {
     override fun onDestroy() {
         clipListener?.let(clipboardManager::removePrimaryClipChangedListener)
         clipListener = null
-        syncStarted = false
+        synchronized(logWatcherLock) { syncStarted = false }
+        stopLogWatcher()
         mainHandler.removeCallbacksAndMessages(null)
         instance = null
         serviceScope.cancel()
@@ -216,20 +244,12 @@ class ClipboardSyncService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        // Manual phone -> PC send, like KDE Connect: the read window gets focus and reads.
-        val sendClipboard = PendingIntent.getActivity(
-            this,
-            1,
-            ClipboardReadActivity.intent(this),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle("Clipboard Share")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openApp)
-            .addAction(R.drawable.ic_tile_send, SEND_ACTION_LABEL, sendClipboard)
             .setOngoing(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -267,6 +287,8 @@ class ClipboardSyncService : Service() {
     private fun startSyncLoop() {
         serviceScope.launch {
             while (isActive) {
+                // READ_LOGS can be granted while the service runs: start the watcher then.
+                startLogWatcher()
                 syncMutex.withLock { recordPollResult(runSync()) }
                 delay(POLL_MS)
             }
@@ -298,18 +320,25 @@ class ClipboardSyncService : Service() {
      * ones; lastSyncedItem prevents content from echoing back to its source.
      * Returns whether this step reached the server, for notification retries.
      */
-    private fun runSync(): Boolean {
+    private fun runSync(capturedLocal: ClipItem? = null): Boolean {
         val targetUrl = serverUrl
         val targetHost = hostKey
         if (targetUrl.isEmpty()) return false
         return try {
             // Read on every step so the UI checkbox takes effect without a restart.
             shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
-            // Android 10+ lets only the focused app read the clipboard; do not even try
-            // without focus: the denied read only returns null. In the background the
-            // phone -> PC direction is the manual send (tile or notification action).
-            val canReadLocal = appVisible() || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-            val local = if (canReadLocal) readLocalClip() else null
+            // Android 10+ lets only the focused app read the clipboard. capturedLocal is
+            // the item ClipboardReadActivity read while it held focus; otherwise do not
+            // even try without focus: the denied read only returns null.
+            val forceLocalRead = capturedLocal != null
+            val canReadLocal = forceLocalRead || appVisible() ||
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+            // The suffix is shown while the app is visible too: that is when the user can
+            // read it and act on a missing permission.
+            val statusSuffix =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) backgroundStatusSuffix() else ""
+            val local = capturedLocal ?: if (canReadLocal) readLocalClip() else null
+            if (forceLocalRead && local != null) Log.d(TAG, "bg read: ${describeForLog(local)}")
             if (local != null && local != lastSyncedItem) {
                 if (local.isImage && !shareImagesEnabled) {
                     // Do not let remote content overwrite an unsent local image.
@@ -330,11 +359,14 @@ class ClipboardSyncService : Service() {
             val remote = fetchRemoteClip(targetUrl)
             if (remote != null && remote != lastSyncedItem) {
                 if (local?.isImage == true && !shareImagesEnabled) return true
+                // A phone copy was just detected and is being read: it wins, so do not
+                // overwrite it with the PC's clipboard before that read has finished.
+                if (!forceLocalRead && triggerPolicy.isRemoteHeldBack()) return true
                 applyRemote(remote)
                 lastSyncedItem = remote
-                clipboardStatus = "Portapapeles sincronizado"
+                clipboardStatus = "Portapapeles sincronizado$statusSuffix"
             } else {
-                clipboardStatus = "Sincronización activa"
+                clipboardStatus = "Sincronización activa$statusSuffix"
             }
             true
         } catch (e: Exception) {
@@ -344,61 +376,204 @@ class ClipboardSyncService : Service() {
         }
     }
 
+    /** Our own writes also make the system log a denial for us; those must not trigger a read. */
+    private fun setClipQuietly(clip: ClipData) {
+        // No denial is logged for a write made while our app has focus.
+        val quietMs = triggerPolicy.onOwnClipWrite(expectEcho = !appVisible())
+        // A real copy suppressed inside the quiet window is fired when it ends.
+        mainHandler.removeCallbacks(quietWindowEnded)
+        mainHandler.postDelayed(quietWindowEnded, quietMs)
+        clipboardManager.setPrimaryClip(clip)
+    }
+
     /**
      * Describes a clip for the log without its content: copied text can be a password or
-     * a one-time code, and logcat is readable by adb and bug reports.
+     * a one-time code, and logcat is readable by adb, bug reports and READ_LOGS apps.
      */
     private fun describeForLog(item: ClipItem): String =
         if (item.isImage) "<image ${item.png?.size ?: 0} bytes>"
         else "<text ${item.text?.length ?: 0} chars>"
+
+    /** Empty when background phone -> PC is fully set up; otherwise names what is missing. */
+    private fun backgroundStatusSuffix(): String = when {
+        checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED ->
+            " · Falta permiso READ_LOGS: ver README"
+        !Settings.canDrawOverlays(this) -> " · Falta permiso de superposición: ver README"
+        triggerPolicy.shouldHintNoLogLines() ->
+            " · Sin datos del log del sistema: aceptá el acceso a los registros (ver README)"
+        else -> ""
+    }
+
+    /**
+     * Reads the system log for the line Android prints when a clipboard change is
+     * dispatched to a listener without focus. That line is the only signal an unfocused
+     * app gets that the user copied something. Safe to call repeatedly: it starts the
+     * watcher only when READ_LOGS is granted and no watcher is running.
+     */
+    private fun startLogWatcher() {
+        if (checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) {
+            if (!readLogsMissingLogged) {
+                readLogsMissingLogged = true
+                Log.w(TAG, "bg trigger disabled: READ_LOGS not granted")
+            }
+            return
+        }
+        readLogsMissingLogged = false
+        synchronized(logWatcherLock) {
+            if (!syncStarted || logWatcherThread?.isAlive == true) return
+            val thread = Thread({ runLogWatcher() }, "clipboard-log-watcher")
+            thread.isDaemon = true
+            logWatcherThread = thread
+            thread.start()
+        }
+    }
+
+    /** Whether the calling thread is still the watcher the service wants running. */
+    private fun isCurrentLogWatcher(): Boolean =
+        synchronized(logWatcherLock) { logWatcherThread === Thread.currentThread() }
+
+    private fun runLogWatcher() {
+        var backoffMs = 1_000L
+        while (isCurrentLogWatcher() && !Thread.currentThread().isInterrupted) {
+            var process: Process? = null
+            try {
+                // Lines logged before this instant are history, e.g. the entry -T 1 replays.
+                val startEpochMs = System.currentTimeMillis()
+                val started = ProcessBuilder(
+                    // ClipboardService runs in system_server, whose log goes to the system
+                    // buffer; -v epoch gives each line a timestamp to compare with the start.
+                    "logcat", "-v", "epoch", "-b", "system", "-T", "1", "ClipboardService:E", "*:S",
+                ).redirectErrorStream(true).start()
+                process = started
+                synchronized(logWatcherLock) {
+                    if (logWatcherThread !== Thread.currentThread()) {
+                        // stopLogWatcher ran while the process was starting.
+                        started.destroy()
+                        return
+                    }
+                    logWatcher = started
+                }
+                triggerPolicy.onWatcherStarted()
+                Log.d(TAG, "bg watcher started")
+                started.inputStream.bufferedReader().useLines { lines ->
+                    for (line in lines) {
+                        if (!isCurrentLogWatcher()) break
+                        backoffMs = 1_000L
+                        if (triggerPolicy.onLogLine(line, packageName, startEpochMs)) {
+                            onClipboardChangeDetected()
+                        }
+                    }
+                }
+            } catch (e: InterruptedException) {
+                process?.destroy()
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "logcat watcher error: ${e.message}")
+            }
+            synchronized(logWatcherLock) {
+                if (logWatcher === process) logWatcher = null
+            }
+            process?.destroy()
+            if (!isCurrentLogWatcher() || Thread.currentThread().isInterrupted) return
+            Log.w(TAG, "logcat watcher ended (exit=${runCatching { process?.exitValue() }.getOrNull()}); restarting in ${backoffMs}ms")
+            try {
+                Thread.sleep(backoffMs)
+            } catch (_: InterruptedException) {
+                return
+            }
+            backoffMs = minOf(backoffMs * 2, 30_000L)
+        }
+    }
+
+    private fun stopLogWatcher() {
+        synchronized(logWatcherLock) {
+            logWatcherThread?.interrupt()
+            logWatcherThread = null
+            logWatcher?.destroy()
+            logWatcher = null
+        }
+        triggerPolicy.onWatcherStopped()
+    }
+
+    private fun onClipboardChangeDetected() {
+        // Called from the watcher thread and, for a deferred copy, from the main thread.
+        // A watcher can still be mid-line when the service is destroyed.
+        if (!syncStarted) return
+        if (appVisible()) return
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "bg trigger ignored: overlay permission missing")
+            return
+        }
+        val decision = triggerPolicy.onTrigger()
+        if (decision !is ClipboardTriggerPolicy.TriggerDecision.LaunchRead) {
+            Log.d(TAG, "bg trigger: $decision")
+            return
+        }
+        Log.d(TAG, "bg trigger: clipboard changed")
+        // The "still running" check and the launch happen under the same lock onDestroy
+        // takes to clear syncStarted, so a destroyed service never launches the window.
+        synchronized(logWatcherLock) {
+            if (!syncStarted) {
+                triggerPolicy.readLaunchFailed()
+                return
+            }
+            scheduleReadGrace(decision.readId)
+            try {
+                startActivity(
+                    Intent(this, ClipboardReadActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION),
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "bg read activity failed: ${e.message}")
+                cancelReadGrace()
+                triggerPolicy.readLaunchFailed()
+            }
+        }
+    }
+
+    /** Fallback in case the read window never reports back; replaces any earlier one. */
+    private fun scheduleReadGrace(readId: Long) {
+        val grace = Runnable { triggerPolicy.readGraceExpired(readId) }
+        synchronized(readGraceLock) {
+            readGraceRunnable?.let(mainHandler::removeCallbacks)
+            readGraceRunnable = grace
+            mainHandler.postDelayed(grace, ClipboardTriggerPolicy.READ_ACTIVITY_GRACE_MS)
+        }
+    }
+
+    private fun cancelReadGrace() {
+        synchronized(readGraceLock) {
+            readGraceRunnable?.let(mainHandler::removeCallbacks)
+            readGraceRunnable = null
+        }
+    }
+
+    private fun onReadActivityFinished() {
+        cancelReadGrace()
+        triggerPolicy.readFinished()
+    }
 
     /**
      * Called by ClipboardReadActivity once it holds focus, so the read is allowed.
      * [onCaptured] runs right after the clipboard has been read and before any network
      * work, so the window can close at once; the push to the PC happens afterwards.
      */
-    fun captureLocalClipAndSend(onCaptured: () -> Unit) {
+    fun captureLocalClipAndSync(onCaptured: () -> Unit) {
+        val readId = triggerPolicy.latestReadId()
         serviceScope.launch {
             // Read outside syncMutex: the window must close at once, not wait for a poll.
             val item = try {
                 readLocalClip()
             } catch (e: Exception) {
-                Log.e(TAG, "manual send: read failed: ${e.message}")
+                Log.e(TAG, "bg read failed: ${e.message}")
                 null
             }
             onCaptured()
-            val outcome = syncMutex.withLock { sendManually(item) }
-            val text = outcome.statusText(hostKey)
-            clipboardStatus = text
-            mainHandler.post { Toast.makeText(this@ClipboardSyncService, text, Toast.LENGTH_SHORT).show() }
-        }
-    }
-
-    /**
-     * The user explicitly asked to send [item], so it is pushed even when it equals
-     * lastSyncedItem. Reuses the same push as the automatic phone -> PC direction.
-     */
-    private fun sendManually(item: ClipItem?): ClipboardSendOutcome {
-        val targetUrl = serverUrl
-        if (targetUrl.isEmpty()) return ClipboardSendOutcome.NO_SYNC
-        if (item == null) {
-            Log.d(TAG, "manual send: clipboard empty")
-            return ClipboardSendOutcome.EMPTY
-        }
-        Log.d(TAG, "manual send: ${describeForLog(item)}")
-        shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
-        if (item.isImage && !shareImagesEnabled) return ClipboardSendOutcome.IMAGE_NOT_SHARED
-        return try {
-            if (!push(targetUrl, item)) {
-                Log.e(TAG, "manual send: push rejected")
-                ClipboardSendOutcome.REJECTED
-            } else {
-                lastSyncedItem = item
-                ClipboardSendOutcome.SENT
+            try {
+                syncMutex.withLock { recordPollResult(runSync(capturedLocal = item)) }
+            } finally {
+                triggerPolicy.localReadSettled(readId)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "manual send: error with $hostKey: ${e.message}")
-            ClipboardSendOutcome.UNREACHABLE
         }
     }
 
@@ -438,11 +613,11 @@ class ClipboardSyncService : Service() {
         if (item.isImage) {
             val bytes = item.png ?: ByteArray(0)
             val uri = saveImageToMediaStore(bytes) ?: return
-            clipboardManager.setPrimaryClip(ClipData.newUri(contentResolver, "shared", uri))
+            setClipQuietly(ClipData.newUri(contentResolver, "shared", uri))
             Log.d(TAG, "remote applied: <image ${bytes.size} bytes>")
         } else {
             val text = item.text ?: ""
-            clipboardManager.setPrimaryClip(ClipData.newPlainText("shared", text))
+            setClipQuietly(ClipData.newPlainText("shared", text))
             Log.d(TAG, "remote applied: ${describeForLog(item)}")
         }
     }
