@@ -127,30 +127,6 @@ func newBroker(path string, now func() time.Time) *Broker {
 	}
 }
 
-// StatePath returns CLIPBOARD_SHARE_STATE or the default per-user state file.
-func StatePath() string {
-	if path := os.Getenv("CLIPBOARD_SHARE_STATE"); path != "" {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return filepath.Join(home, ".config", "clipboard-share", "state.json")
-}
-
-// ControlPath returns CLIPBOARD_SHARE_CTL_SOCK or the default control socket.
-func ControlPath() string {
-	if path := os.Getenv("CLIPBOARD_SHARE_CTL_SOCK"); path != "" {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = "."
-	}
-	return filepath.Join(home, ".config", "clipboard-share", "ctl.sock")
-}
-
 // Load restores approved devices from StatePath. A missing state file is an
 // empty broker; pending requests are deliberately never restored.
 func Load() (*Broker, error) {

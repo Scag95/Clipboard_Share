@@ -7,7 +7,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 
-	"clipboard-share/internal/input"
+	"nudge/internal/input"
 )
 
 // TokenValidator checks session tokens issued through pairing (implemented

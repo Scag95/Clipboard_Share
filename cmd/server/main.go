@@ -16,11 +16,11 @@ import (
 	"syscall"
 	"time"
 
-	"clipboard-share/internal/api"
-	"clipboard-share/internal/clipboard"
-	"clipboard-share/internal/discovery"
-	"clipboard-share/internal/input"
-	"clipboard-share/internal/pair"
+	"nudge/internal/api"
+	"nudge/internal/clipboard"
+	"nudge/internal/discovery"
+	"nudge/internal/input"
+	"nudge/internal/pair"
 )
 
 func main() {
@@ -30,28 +30,57 @@ func main() {
 	runServer()
 }
 
+// migrateConfig moves the pre-rename ~/.config/clipboard-share directory to
+// ~/.config/nudge once. Failure is reported and the old directory is left as
+// it was; startup continues.
+func migrateConfig(logf func(format string, args ...any)) {
+	moved, err := pair.MigrateLegacyConfig()
+	if err != nil {
+		logf("nudge: config migration skipped, %s left untouched: %v\n", pair.LegacyConfigDir(), err)
+		return
+	}
+	if moved {
+		logf("nudge: moved %s to %s\n", pair.LegacyConfigDir(), pair.ConfigDir())
+	}
+}
+
 // instanceName returns the hostname to announce over mDNS so clients show
 // the real machine name ("omarchy", "livingroom-pc"), falling back to
-// "clipboard-share" when the hostname is unusable.
+// "nudge" when the hostname is unusable.
 func instanceName() string {
-	name, err := os.Hostname()
+	return instanceNameFrom(os.Hostname())
+}
+
+func instanceNameFrom(name string, err error) string {
 	if err != nil {
-		return "clipboard-share"
+		return "nudge"
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "clipboard-share"
+		return "nudge"
 	}
 	if len(name) > 60 {
 		name = name[:60]
 	}
 	return name
 }
-func runServer() {
-	port := "8765"
-	if p := os.Getenv("CLIPBOARD_SHARE_PORT"); p != "" {
-		port = p
+
+// serverPort returns NUDGE_PORT (or CLIPBOARD_SHARE_PORT) or 8765.
+func serverPort() string {
+	if p := pair.EnvOverride("PORT"); p != "" {
+		return p
 	}
+	return "8765"
+}
+
+// pairNotification returns the desktop notification shown for a new request.
+func pairNotification(deviceName string) (title, body string) {
+	return "Nudge", fmt.Sprintf("Pair request from %s — nudge pair --last", deviceName)
+}
+
+func runServer() {
+	migrateConfig(log.Printf)
+	port := serverPort()
 
 	pairer, err := pair.Load()
 	if err != nil {
@@ -82,12 +111,9 @@ func runServer() {
 	pairer.OnRequest(func(req pair.RequestInfo) {
 		// Notification is deliberately best-effort: headless systems and
 		// sessions without DISPLAY still approve through the CLI.
+		title, body := pairNotification(req.Name)
 		go func() {
-			_ = exec.Command(
-				"notify-send",
-				"Clipboard Share",
-				fmt.Sprintf("Pair request from %s — clipboard-share pair --last", req.Name),
-			).Run()
+			_ = exec.Command("notify-send", title, body).Run()
 		}()
 	})
 
@@ -103,7 +129,7 @@ func runServer() {
 			serveErr <- err
 		}
 	}()
-	log.Printf("Clipboard Share server listening on %s", addr)
+	log.Printf("Nudge server listening on %s", addr)
 	log.Printf("pairing control socket: %s", pair.ControlPath())
 
 	sig := make(chan os.Signal, 1)
@@ -133,29 +159,30 @@ type pairClientResponse struct {
 func runPairClient(args []string, stdout, stderr io.Writer) int {
 	command, err := pairClientCommand(args)
 	if err != nil {
-		fmt.Fprintf(stderr, "clipboard-share pair: %v\n", err)
-		fmt.Fprintln(stderr, "usage: clipboard-share pair list | --last | deny --request <id> | revoke --device <id>")
+		fmt.Fprintf(stderr, "nudge pair: %v\n", err)
+		fmt.Fprintln(stderr, "usage: nudge pair list | --last | deny --request <id> | revoke --device <id>")
 		return 1
 	}
 
+	migrateConfig(func(format string, args ...any) { fmt.Fprintf(stderr, format, args...) })
 	conn, err := net.DialTimeout("unix", pair.ControlPath(), 2*time.Second)
 	if err != nil {
-		fmt.Fprintf(stderr, "clipboard-share pair: cannot connect to server at %s: %v (is the server running?)\n", pair.ControlPath(), err)
+		fmt.Fprintf(stderr, "nudge pair: cannot connect to server at %s: %v (is the server running?)\n", pair.ControlPath(), err)
 		return 1
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if err := json.NewEncoder(conn).Encode(command); err != nil {
-		fmt.Fprintf(stderr, "clipboard-share pair: send command: %v\n", err)
+		fmt.Fprintf(stderr, "nudge pair: send command: %v\n", err)
 		return 1
 	}
 	var response pairClientResponse
 	if err := json.NewDecoder(conn).Decode(&response); err != nil {
-		fmt.Fprintf(stderr, "clipboard-share pair: read server response: %v\n", err)
+		fmt.Fprintf(stderr, "nudge pair: read server response: %v\n", err)
 		return 1
 	}
 	if !response.OK {
-		fmt.Fprintf(stderr, "clipboard-share pair: %s\n", response.Error)
+		fmt.Fprintf(stderr, "nudge pair: %s\n", response.Error)
 		return 1
 	}
 	if command["cmd"] == "list" {

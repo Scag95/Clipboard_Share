@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"clipboard-share/internal/pair"
+	"nudge/internal/pair"
 )
 
 type pairingClient struct {

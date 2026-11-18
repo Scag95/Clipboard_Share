@@ -35,7 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "ClipboardShare"
-        const val SERVICE_TYPE = "_clipboard-share._tcp."
+        const val SERVICE_TYPE = "_nudge._tcp."
         const val NOTIFICATION_PERMISSION_REQUEST = 1001
         const val SEARCH_WINDOW_MS = 4_000L
     }

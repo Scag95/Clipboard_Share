@@ -9,7 +9,7 @@ import (
 
 	"github.com/gorilla/mux"
 
-	"clipboard-share/internal/pair"
+	"nudge/internal/pair"
 )
 
 // Pairer starts device pairing and polls its state (implemented by

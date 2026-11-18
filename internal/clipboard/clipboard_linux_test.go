@@ -235,7 +235,7 @@ func TestWaylandTextRoundtrip(t *testing.T) {
 	if err := Init(); err != nil {
 		t.Fatalf("Init() error = %v", err)
 	}
-	want := fmt.Sprintf("clipboard-share Wayland roundtrip %d", time.Now().UnixNano())
+	want := fmt.Sprintf("nudge Wayland roundtrip %d", time.Now().UnixNano())
 	if err := SetText(want); err != nil {
 		t.Fatalf("SetText() error = %v", err)
 	}
