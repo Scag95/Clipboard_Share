@@ -7,6 +7,10 @@ móvil Android en la misma red WiFi, mediante descubrimiento automático
 (mDNS/Bonjour) y transferencia P2P sobre HTTP local. Sin cables ni servicios en
 la nube. El móvil además puede manejar el mouse y el teclado del PC.
 
+> **Windows**: hay un build para Windows 10/11 x64, compilado desde Linux y
+> **todavía sin probar en Windows** (ver “Windows (sin probar)”). La versión
+> probada es la de Linux.
+
 ## Objetivo
 
 - PC (Windows o Linux) y móvil (Android) en la misma LAN.
@@ -47,7 +51,8 @@ Clipboard_Share/
 ### Servidor (PC)
 
 - Go 1.22 o superior (se usa 1.24 por dependencias).
-- Windows 10/11 (acceso al clipboard vía `golang.design/x/clipboard`).
+- Windows 10/11 (acceso al clipboard vía `golang.design/x/clipboard`);
+  compila, pero no está probado en Windows.
 - **Linux**: X11 usa la misma librería; en Wayland el server usa
   `wl-copy`/`wl-paste` (`wl-clipboard`) automáticamente si hay
   `WAYLAND_DISPLAY`. Para el control remoto hace falta `/dev/uinput`
@@ -144,6 +149,79 @@ El paquete también instala una regla udev para `/dev/uinput` (ver “Permisos
 uinput”). Detalles del paquete en `pkgbuild/README.md`. Sin paquete, se puede
 probar el panel a mano: `panel/bin/build && panel/build/nudge-panel`;
 sus tests corren con `panel/bin/test` (Qt Test, offscreen).
+
+## Windows (sin probar)
+
+El build de Windows 10/11 x64 se compila desde Linux y **no lo probé en
+Windows todavía**: puede fallar. Si algo no anda, mirá el log y avisá.
+
+Se descarga como `nudge-<versión>-windows-x64.zip` (con su `.sha256`) y trae
+dos ejecutables del mismo código: `nudge.exe` (consola: el CLI `nudge pair` y,
+abierto a mano, el servidor con el log en pantalla) y `nudge-background.exe`
+(sin ventana: el servidor en segundo plano), más el ícono, los scripts de
+instalación y `README-windows.txt`.
+
+### Instalar
+
+1. Extraé el zip completo (clic derecho → *Extraer todo*).
+2. Doble clic en `Install Nudge.cmd`. No pide administrador: instala en
+   `%LOCALAPPDATA%\Programs\Nudge`, crea la carpeta **Nudge** en el menú
+   Inicio (“Nudge”, “Nudge - autostart on-off”, “Uninstall Nudge”), activa
+   el inicio automático, agrega la carpeta al `PATH` del usuario e inicia el
+   servidor. Volver a ejecutarlo actualiza en el lugar.
+
+Opciones de `install.ps1`: `-NoAutostart`, `-FirewallRule yes|no` (para
+instalar sin preguntas), `-NoStart`, `-NoPause`.
+
+Los ejecutables **no están firmados**: SmartScreen puede mostrar “Windows
+protegió su PC” (*Más información* → *Ejecutar de todas formas*). Verificá
+antes el SHA256 (`certutil -hashfile <zip> SHA256`).
+
+### Emparejar
+
+No hay panel en Windows: cuando un teléfono pide emparejarse aparece una
+ventana **Sí/No** con su nombre e IP, con **No** como botón por defecto (un
+Enter sin querer rechaza). El CLI sigue sirviendo, desde una terminal nueva:
+`nudge pair list` y `nudge pair --last`.
+
+### Inicio automático
+
+“Nudge - autostart on-off” en el menú Inicio activa o desactiva el acceso
+directo de la carpeta Inicio del usuario (también
+`toggle-autostart.ps1 on|off|status`). No inicia ni detiene el servidor que
+ya corre.
+
+### Firewall
+
+El instalador explica y pregunta si agregar dos reglas de entrada, solo en
+redes **privadas** y solo para `nudge-background.exe`: “Nudge” (TCP 8765) y
+“Nudge mDNS” (UDP 5353). Hace falta aceptar el aviso de administrador (UAC);
+si lo rechazás, la instalación sigue y podés volver a ejecutarla después. La
+WiFi tiene que estar marcada como red privada.
+
+### Desinstalar y log
+
+Menú Inicio → Nudge → “Uninstall Nudge” (o `Uninstall Nudge.cmd` del zip):
+detiene el servidor y borra los accesos directos, la entrada del `PATH`, las
+reglas del firewall y la carpeta de instalación. Pregunta antes de borrar
+`%APPDATA%\nudge` (por defecto No), donde quedan los teléfonos emparejados
+(`state.json`). El servidor en segundo plano escribe su log en
+`%APPDATA%\nudge\nudge.log`.
+
+### Límites
+
+- Sin probar en Windows por el autor.
+- Sin panel ni ícono en la bandeja en Windows todavía.
+- Ejecutables sin firmar (SmartScreen).
+
+### Recompilar el zip
+
+Desde Linux, con Go 1.24, `rsvg-convert`, ImageMagick (`magick`) y `zip`:
+
+```bash
+scripts/build-windows.sh 0.1.0
+# salida: dist/nudge-0.1.0-windows-x64.zip y su .sha256
+```
 
 ## Uso (servidor PC)
 
@@ -248,8 +326,8 @@ panel nunca la aprueba solo ni abre su ventana por ella.
 ## Generar binario
 
 ```bash
-# Windows (desde Linux, sin cgo):
-GOOS=windows go build -o nudge.exe ./cmd/server
+# Windows (desde Linux, sin cgo); el zip completo sale de scripts/build-windows.sh:
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o nudge.exe ./cmd/server
 
 # Linux nativo:
 go build -o nudge ./cmd/server
@@ -310,13 +388,13 @@ propio para no abrir la ventana de lectura tras cada copia que llega de la PC.
 
 ## Estado del proyecto
 
-- Servidor Go con clipboard real de Windows **y Linux** (texto + imagen; en
-  Wayland vía `wl-clipboard`), apagado ordenado (graceful shutdown) y límites
-  de tamaño en la API.
+- Servidor Go con clipboard real de Linux (texto + imagen; en Wayland vía
+  `wl-clipboard`), apagado ordenado (graceful shutdown) y límites de tamaño
+  en la API. El build de Windows compila pero está sin probar en Windows.
 - Control remoto mouse + teclado: pairing por identidad de dispositivo con
   aprobación en el PC (sin PIN), estado persistido, stream WebSocket con
-  validación estricta y límites de tasa; `SendInput` en Windows y `uinput` en
-  Linux.
+  validación estricta y límites de tasa; `uinput` en Linux y `SendInput` en
+  Windows (sin probar).
 - Panel de escritorio para Linux (Qt Quick) con bandeja, paquete Arch `nudge`,
   servicio de usuario, interruptores de inicio automático (servidor y panel),
   ícono y entrada de launcher. Verificado instalando
