@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome clipboard glyph for the Quick Settings tile and notification action. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18,6h12v4h4c2.2,0 4,1.8 4,4v26c0,2.2 -1.8,4 -4,4h-20c-2.2,0 -4,-1.8 -4,-4v-26c0,-2.2 1.8,-4 4,-4h4zM18,12h-4v28h20v-28h-4v4h-12z" />
+</vector>

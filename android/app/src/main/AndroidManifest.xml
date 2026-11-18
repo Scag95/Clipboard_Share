@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     package="com.clipboardshare">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -9,13 +8,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Background phone -> PC clipboard (Android 10+ denies reads without focus):
-         READ_LOGS lets the service see the system's clipboard-denial log line, and
-         SYSTEM_ALERT_WINDOW lets it bring a transparent window to the front to read.
-         Neither can be granted from the UI; see README (adb pm grant / appops). -->
-    <uses-permission android:name="android.permission.READ_LOGS"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Needed only for MediaStore writes on API < 29 (scoped storage handles 10+). -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
@@ -47,6 +39,18 @@
             android:taskAffinity=""
             android:launchMode="singleInstance"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- Manual phone -> PC send, like KDE Connect (Android 10+ denies clipboard
+             reads without focus, so the tile opens ClipboardReadActivity). -->
+        <service
+            android:name=".ClipboardSendTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_send"
+            android:label="Enviar portapapeles"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
         <service
             android:name=".ClipboardSyncService"
             android:exported="false"
