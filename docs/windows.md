@@ -40,9 +40,19 @@ antes el SHA256 (`certutil -hashfile <zip> SHA256`).
 
 Cuando un teléfono pide emparejarse, el ícono de la bandeja muestra una
 notificación ("Solicitud de emparejamiento") y aparece una ventana **Sí/No**
-con su nombre e IP, con **No** como botón por defecto (un Enter sin querer
-rechaza). La ventana es el único lugar donde se aprueba. El CLI también
-sirve, desde una terminal nueva: `nudge pair list` y `nudge pair --last`.
+con su nombre, su IP y el código de verificación de la PC
+(`Código: XXXX-XXXX-XXXX`), con **No** como botón por defecto (un Enter sin
+querer rechaza). Elegí **Sí** solo si el teléfono muestra el mismo código.
+La ventana es el único lugar donde se aprueba. El CLI también sirve, desde
+una terminal nueva: `nudge pair list` (la primera línea es
+`Verification code: ...`) y `nudge pair --last`.
+
+El tráfico con el teléfono va cifrado (HTTPS/WSS) con un certificado
+autofirmado que el servidor guarda en `%APPDATA%\nudge\tls.crt` y
+`%APPDATA%\nudge\tls.key`; el teléfono lo recuerda al emparejar. Si borrás
+`tls.key` (o `%APPDATA%\nudge`, por ejemplo al desinstalar con borrado de
+datos), el servidor genera otro y **cada teléfono tiene que emparejarse de
+nuevo**.
 
 ## Ícono en la bandeja
 

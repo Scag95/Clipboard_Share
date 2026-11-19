@@ -146,6 +146,34 @@ private slots:
         QCOMPARE(server.commands.first().value("cmd").toString(), QString("list"));
     }
 
+    // S5: the server's verification code comes with every list and goes away
+    // with the server.
+    void listCarriesTheVerificationCode() {
+        auto server = std::make_unique<FakeServer>(m_path);
+        server->code = "6B86-B273-FF34";
+        server->fingerprint = "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b";
+        Backend backend(m_path, 0);
+        QSignalSpy changed(&backend, &Backend::changed);
+        QCOMPARE(backend.code(), QString());
+
+        backend.refresh();
+        QVERIFY(waitChanged(changed));
+        QCOMPARE(backend.code(), QString("6B86-B273-FF34"));
+
+        // A changed code alone is a change worth announcing.
+        server->code = "AAAA-BBBB-CCCC";
+        backend.refresh();
+        QVERIFY(waitChanged(changed, 2));
+        QCOMPARE(backend.code(), QString("AAAA-BBBB-CCCC"));
+
+        server.reset();
+        QLocalServer::removeServer(m_path);
+        backend.refresh();
+        QVERIFY(waitChanged(changed, 3));
+        QVERIFY(!backend.online());
+        QCOMPARE(backend.code(), QString());
+    }
+
     void missingSocketReportsOfflineWithTheSocketPath() {
         Backend backend(m_dir.filePath("nope.sock"), 0);
         QSignalSpy changed(&backend, &Backend::changed);

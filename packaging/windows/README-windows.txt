@@ -61,13 +61,21 @@ copia, para que el inicio automático no avise en cada sesión.
 Emparejar el teléfono
 ---------------------
 En la app de Android elegí esta PC. En la PC aparece una ventana
-"Sí / No" con el nombre y la IP del teléfono. El botón por defecto es No:
-un Enter o un espacio sin querer rechaza. Tocá "Sí" solo si reconocés el
-teléfono (cualquiera en la red puede pedir emparejarse). La solicitud
+"Sí / No" con el nombre y la IP del teléfono y un código de verificación
+(por ejemplo "Código: 4F2A-91C7-0B3E"). El teléfono también muestra un
+código: tocá "Sí" solo si reconocés el teléfono y los dos códigos son
+iguales (cualquiera en la red puede pedir emparejarse). El botón por
+defecto es No: un Enter o un espacio sin querer rechaza. La solicitud
 caduca a los 90 s.
 
+El tráfico con el teléfono va cifrado (HTTPS) con un certificado propio de
+esta PC (%APPDATA%\nudge\tls.crt y tls.key). Si borrás tls.key o la
+carpeta %APPDATA%\nudge, la PC genera otro certificado y cada teléfono
+tiene que emparejarse de nuevo.
+
 También se puede desde una terminal (abrila después de instalar):
-  nudge pair list      ver solicitudes pendientes y teléfonos aprobados
+  nudge pair list      ver el código de verificación, las solicitudes
+                       pendientes y los teléfonos aprobados
   nudge pair --last    aprobar la solicitud más nueva
   nudge pair revoke --device <id>   quitar un teléfono
 
@@ -111,6 +119,7 @@ teléfonos emparejados.
 Datos y log
 -----------
   Configuración y emparejamientos: %APPDATA%\nudge\state.json
+  Certificado del servidor:        %APPDATA%\nudge\tls.crt y tls.key
   Log del servidor en segundo plano: %APPDATA%\nudge\nudge.log
 
 

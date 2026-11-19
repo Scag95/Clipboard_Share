@@ -117,6 +117,24 @@ private slots:
                 QCOMPARE(command.value("request").toString(), QString("r1"));
     }
 
+    // S5: the code the phone must also show sits in the pairing requests section.
+    void theVerificationCodeIsShownInThePairingSection() {
+        Session s(m_path, [](FakeServer &srv) {
+            srv.code = "6B86-B273-FF34";
+            srv.requests = {request("r7", "Pixel", "192.168.0.13")};
+        });
+        QVERIFY(s.window);
+        const QString text = "Verification code: 6B86-B273-FF34";
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, text) != nullptr, 3000);
+        QCOMPARE(itemWithText(s.window, text)->property("textFormat").toInt(), int(Qt::PlainText));
+    }
+
+    void noCodeIsShownWithoutOne() {
+        Session s(m_path, [](FakeServer &srv) { srv.requests = {request("r8", "Pixel", "192.168.0.13")}; });
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, "Approve") != nullptr, 3000);
+        QVERIFY(itemWithText(s.window, "Verification code: ") == nullptr);
+    }
+
     // Polls that bring the same list must not rebuild the cards: a click that
     // crosses a rebuild would land on a delegate being destroyed.
     void unchangedPollsKeepTheSameCards() {

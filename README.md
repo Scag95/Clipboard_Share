@@ -71,10 +71,17 @@ clipboard con la app cerrada hacen falta dos comandos de `adb`, explicados en
 2. En la PC aparece la solicitud con el nombre del teléfono: en Linux, un
    aviso en la bandeja que abre el panel; en Windows, una notificación en la
    bandeja y una ventana Sí/No (con No por defecto).
-3. La aprobás. La solicitud caduca a los 90 s si no hacés nada.
-4. De ahí en más el celu se reconecta solo, incluso después de reiniciar la
+3. Compará el código de verificación: el celu muestra uno como
+   `4F2A-91C7-0B3E` y la PC el mismo (en el panel, en la ventana Sí/No o con
+   `nudge pair list`). Si no coinciden, rechazá: otro equipo se está haciendo
+   pasar por tu PC.
+4. La aprobás. La solicitud caduca a los 90 s si no hacés nada.
+5. De ahí en más el celu se reconecta solo, incluso después de reiniciar la
    PC. Si perdés el teléfono, lo revocás desde el panel o con
    `nudge pair revoke`.
+
+Si borrás la configuración del servidor (o solo su clave, `tls.key`), la PC
+genera otro certificado y cada teléfono tiene que emparejarse de nuevo.
 
 ## Privacidad y seguridad
 
@@ -83,9 +90,13 @@ clipboard con la app cerrada hacen falta dos comandos de `adb`, explicados en
   tiene su token.
 - Cualquiera en la red puede *pedir* emparejarse, por eso aprobar es siempre
   un clic tuyo. El panel nunca aprueba solo.
+- Todo el tráfico entre el celu y la PC va cifrado (HTTPS y WSS) con un
+  certificado autofirmado de la PC. Al emparejar, el celu guarda su huella y
+  después rechaza cualquier otro certificado; el código de verificación es
+  lo que te protege en ese primer contacto.
 - **El clipboard no tiene autenticación**: cualquiera en la misma red puede
-  leerlo y escribirlo. Y no hay TLS, así que el tráfico va sin cifrar. Usalo
-  en redes de confianza (la de tu casa, no la del café).
+  leerlo y escribirlo. Usalo en redes de confianza (la de tu casa, no la del
+  café).
 - La app de Android no guarda en sus logs lo que copiás, solo el tipo y el
   tamaño.
 

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -310,6 +311,60 @@ func TestControlSocketCommandsAndTokenPrivacy(t *testing.T) {
 	response = send(`{"cmd":"unknown"}`)
 	if response["ok"] != false || response["error"] == "" {
 		t.Fatalf("unknown command response = %#v", response)
+	}
+}
+
+// S5: `list` carries the certificate's verification code and fingerprint so
+// the CLI and the panel can show the code; other commands stay unchanged.
+func TestControlListCarriesTheVerificationCode(t *testing.T) {
+	b := newTestBroker(t)
+	const fp = "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+	b.SetVerification(fp, "6B86-B273-FF34")
+	if gotFP, gotCode := b.Verification(); gotFP != fp || gotCode != "6B86-B273-FF34" {
+		t.Fatalf("Verification() = %q, %q", gotFP, gotCode)
+	}
+	if _, err := b.Request("device-1", "First", "192.0.2.10"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLIPBOARD_SHARE_CTL_SOCK", filepath.Join(t.TempDir(), "ctl.sock"))
+	control, err := ListenControl(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { control.Close() })
+	send := func(cmd string) map[string]any {
+		t.Helper()
+		conn, err := net.Dial("unix", ControlPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if _, err := fmt.Fprintln(conn, cmd); err != nil {
+			t.Fatal(err)
+		}
+		line, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response map[string]any
+		if err := json.Unmarshal([]byte(line), &response); err != nil {
+			t.Fatalf("invalid socket response %q: %v", line, err)
+		}
+		return response
+	}
+
+	list := send(`{"cmd":"list"}`)
+	if list["ok"] != true || list["code"] != "6B86-B273-FF34" || list["fingerprint"] != fp ||
+		len(list["requests"].([]any)) != 1 || len(list["devices"].([]any)) != 0 {
+		t.Fatalf("list = %#v", list)
+	}
+	approved := send(`{"cmd":"approve-last"}`)
+	if want := map[string]any{"ok": true, "message": "Approved newest pair request.", "requests": nil, "devices": nil}; !reflect.DeepEqual(approved, want) {
+		t.Fatalf("approve-last = %#v, want %#v", approved, want)
+	}
+	unknown := send(`{"cmd":"bogus"}`)
+	if want := map[string]any{"ok": false, "error": `unknown command "bogus"`, "requests": nil, "devices": nil}; !reflect.DeepEqual(unknown, want) {
+		t.Fatalf("unknown = %#v, want %#v", unknown, want)
 	}
 }
 
