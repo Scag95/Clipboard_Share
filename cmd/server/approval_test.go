@@ -108,6 +108,17 @@ func TestApprovalTextIsSpanishWithSanitizedNameAndIP(t *testing.T) {
 	}
 }
 
+func TestApprovalTextFullWordingUsesVoseo(t *testing.T) {
+	got := approvalText(pair.RequestInfo{Name: "Pixel 8 de Ana", IP: "192.168.1.20"})
+	want := "Un teléfono quiere emparejarse con este equipo.\n\n" +
+		"Nombre: Pixel 8 de Ana\nIP: 192.168.1.20\n\n" +
+		"¿Permitir que controle el portapapeles, el ratón y el teclado de este equipo?\n\n" +
+		"Si no reconocés este dispositivo, elegí No."
+	if got != want {
+		t.Errorf("approval text =\n%q\nwant\n%q", got, want)
+	}
+}
+
 func TestApprovalDialogYesApprovesAndNoDenies(t *testing.T) {
 	cases := []struct {
 		answer      int

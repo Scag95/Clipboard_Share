@@ -70,7 +70,7 @@ func approvalText(req pair.RequestInfo) string {
 	return fmt.Sprintf("Un teléfono quiere emparejarse con este equipo.\n\n"+
 		"Nombre: %s\nIP: %s\n\n"+
 		"¿Permitir que controle el portapapeles, el ratón y el teclado de este equipo?\n\n"+
-		"Si no reconoces este dispositivo, pulsa No.", name, ip)
+		"Si no reconocés este dispositivo, elegí No.", name, ip)
 }
 
 // approvalQueue shows one dialog at a time. Requests beyond the queue
