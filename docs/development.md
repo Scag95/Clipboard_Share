@@ -269,9 +269,11 @@ compila el paquete de Arch, el zip de Windows y el APK firmado, genera
 **Prueba en seco**: Actions → release → Run workflow (o
 `gh workflow run release.yml --ref <rama>`). Con `dry_run` en `true` (por
 defecto) compila todo y deja los archivos como artifacts del run, sin crear
-ni tocar ninguna release; si faltan los secrets, el APK sale sin firmar
-(`nudge-<versión>-unsigned.apk`) y el run lo avisa. Con `dry_run` en `false`
-tampoco publica, pero exige el APK firmado como un tag.
+ni tocar ninguna release. El APK sale siempre sin firmar
+(`nudge-<versión>-unsigned.apk`): los secrets de firma solo llegan a un tag o
+a una corrida con `dry_run` en `false`, que tampoco publica pero exige el APK
+firmado como un tag. Los PR que tocan el empaquetado corren la misma prueba
+en seco, sin secrets (aunque vengan de una rama de este repo).
 
 ## Estado del proyecto
 
