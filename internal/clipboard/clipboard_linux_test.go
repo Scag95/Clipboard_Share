@@ -214,7 +214,17 @@ func TestSetImageRejectsEmptyDataBeforeRunningCommand(t *testing.T) {
 	}
 }
 
+// requireRealClipboard skips tests that read or write the user's real system
+// clipboard unless NUDGE_CLIPBOARD_TESTS=1 is set, so `go test ./...` is safe.
+func requireRealClipboard(t *testing.T) {
+	t.Helper()
+	if os.Getenv("NUDGE_CLIPBOARD_TESTS") != "1" {
+		t.Skip("touches the real system clipboard; set NUDGE_CLIPBOARD_TESTS=1 to run")
+	}
+}
+
 func TestWaylandTextRoundtrip(t *testing.T) {
+	requireRealClipboard(t)
 	if os.Getenv("WAYLAND_DISPLAY") == "" {
 		t.Skip("WAYLAND_DISPLAY is not set")
 	}
