@@ -16,7 +16,19 @@
 #   install.ps1 uninstall.ps1 toggle-autostart.ps1 firewall.ps1
 #   README-windows.txt
 #
+# Both exes embed a Windows resource section (made with go-winres from
+# packaging/windows/winres/winres.json.in): the Nudge icon (the same 16..256
+# sizes as nudge.ico) as icon group resource ID 1, which Explorer and the
+# taskbar show and the tray loads with LoadImageW(MAKEINTRESOURCE(1)); a
+# version resource (ProductName "Nudge", FileDescription, CompanyName and
+# LegalCopyright from LICENSE, OriginalFilename, FileVersion/ProductVersion =
+# the version); and an application manifest (asInvoker, per-monitor v2 DPI
+# aware, Common Controls v6). The .syso is generated and linked inside a temp
+# copy of the Go sources, so no .syso ever appears in cmd/server.
+#
 # Needs: go (1.24), rsvg-convert, magick (ImageMagick 7), zip, sha256sum.
+# go-winres is a pinned build tool run through `go run` (network or a warm
+# module cache on the first run); it is not a dependency in go.mod.
 # Text files are converted to CRLF and the .ps1/.txt files get a UTF-8 BOM in
 # the zip, because Windows PowerShell 5.1 reads BOM-less scripts as ANSI and
 # would garble the Spanish messages.
@@ -38,6 +50,26 @@ if [[ ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z.+_-]*$ ]]; then
   echo "build-windows: invalid version '$version'" >&2
   exit 2
 fi
+
+# Fixed version fields need four numbers: 0.1.0 -> 0.1.0.0, 1.2.3-rc1 ->
+# 1.2.3.0, a version that does not start with a number -> 0.0.0.0.
+version4() {
+  local num parts
+  num="$(printf '%s' "$1" | grep -oE '^[0-9]+(\.[0-9]+){0,3}' || true)"
+  IFS=. read -r -a parts <<< "${num:-0}"
+  while ((${#parts[@]} < 4)); do parts+=(0); done
+  for p in "${parts[@]}"; do
+    if ((10#$p > 65535)); then
+      echo "build-windows: version part $p does not fit a Windows version" >&2
+      exit 2
+    fi
+  done
+  printf '%d.%d.%d.%d\n' "$((10#${parts[0]}))" "$((10#${parts[1]}))" "$((10#${parts[2]}))" "$((10#${parts[3]}))"
+}
+version4="$(version4 "$version")"
+
+# Pinned build tool (go run, not a go.mod dependency).
+go_winres="github.com/tc-hib/go-winres@v0.3.3"
 
 # Use the mise Go install only when no working go is on PATH (a mise shim
 # without a configured version is on PATH but fails).
@@ -67,18 +99,23 @@ for f in "${text_files[@]}"; do
   [[ -f "$src_dir/$f" ]] || { echo "build-windows: missing $src_dir/$f" >&2; exit 1; }
 done
 [[ -f "$svg" ]] || { echo "build-windows: missing $svg" >&2; exit 1; }
+winres_tpl="$src_dir/winres/winres.json.in"
+[[ -f "$winres_tpl" ]] || { echo "build-windows: missing $winres_tpl" >&2; exit 1; }
+
+# CompanyName and LegalCopyright come from the LICENSE copyright line
+# ("Copyright (c) 2026 Scag95" -> company "Scag95").
+copyright="$(grep -m1 -E '^Copyright ' LICENSE 2>/dev/null || true)"
+company="$(printf '%s' "$copyright" | sed -E 's/^Copyright[[:space:]]+(\([cC]\)[[:space:]]+)?[0-9][0-9, -]*[[:space:]]+//')"
+if [[ -z "$copyright" || -z "$company" || "$copyright$company" == *[\"\\]* ]]; then
+  echo "build-windows: cannot read a plain copyright line from LICENSE" >&2
+  exit 1
+fi
 
 # Everything is staged in a temp dir that is always removed.
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 pkg="$stage/pkg"
-mkdir -p "$pkg" "$stage/icon"
-
-echo "==> go build (windows/amd64, version $version)"
-export CGO_ENABLED=0 GOOS=windows GOARCH=amd64
-go build -trimpath -ldflags "-s -w" -o "$pkg/nudge.exe" ./cmd/server
-go build -trimpath -ldflags "-s -w -H=windowsgui" -o "$pkg/nudge-background.exe" ./cmd/server
-unset CGO_ENABLED GOOS GOARCH
+mkdir -p "$pkg" "$stage/icon" "$stage/winres"
 
 echo "==> nudge.ico"
 sizes=(16 24 32 48 64 128 256)
@@ -88,6 +125,43 @@ for s in "${sizes[@]}"; do
   pngs+=("$stage/icon/$s.png")
 done
 magick "${pngs[@]}" "$pkg/nudge.ico"
+# go-winres resolves file names relative to the json file.
+cp "$pkg/nudge.ico" "$stage/winres/nudge.ico"
+
+# The Go sources are built from a temp copy so the .syso never lands in the
+# repository (go build only links .syso files found in the package dir).
+src="$stage/src"
+mkdir -p "$src"
+cp -R go.mod go.sum cmd internal "$src/"
+find "$src" -name '*.syso' -type f -delete
+
+# Escape a value for the replacement side of `sed s|...|...|`.
+sed_repl() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
+
+# build_exe <exe name> <description> <extra ldflags>
+build_exe() {
+  local exe="$1" desc="$2" ldflags="$3" json="$stage/winres/${1%.exe}.json"
+  sed -e "s|@DESCRIPTION@|$(sed_repl "$desc")|g" \
+      -e "s|@VERSION4@|$version4|g" \
+      -e "s|@VERSION@|$version|g" \
+      -e "s|@COMPANY@|$(sed_repl "$company")|" \
+      -e "s|@COPYRIGHT@|$(sed_repl "$copyright")|" \
+      -e "s|@INTERNAL@|${exe%.exe}|" \
+      -e "s|@FILENAME@|$exe|" \
+      "$winres_tpl" > "$json"
+  (cd "$stage/winres" && go run "$go_winres" make --in "$json" --arch amd64 --out "$src/cmd/server/rsrc")
+  (
+    cd "$src"
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+      go build -trimpath -buildvcs=false -ldflags "-s -w $ldflags" -o "$pkg/$exe" ./cmd/server
+  )
+  rm -f "$src/cmd/server/rsrc_windows_amd64.syso"
+}
+
+echo "==> go build (windows/amd64, version $version, resources $version4)"
+desc="Nudge: portapapeles y control remoto desde el celu"
+build_exe nudge.exe "$desc" ""
+build_exe nudge-background.exe "$desc (segundo plano)" "-H=windowsgui"
 
 echo "==> scripts and docs"
 bom=$'\xEF\xBB\xBF'
