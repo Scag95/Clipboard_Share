@@ -132,6 +132,7 @@ void Backend::send(const QJsonObject &command, bool refreshAfter) {
 void Backend::applyList(const QJsonObject &response) {
     m_requests.clear();
     m_devices.clear();
+    m_code = response.value("code").toString();
     QSet<QString> present;
     QList<QPair<QString, QString>> fresh;
     for (const auto &value : response.value("requests").toArray()) {
@@ -158,6 +159,7 @@ void Backend::setOffline(const QString &reason) {
     m_errorFromAction = false;
     m_requests.clear();
     m_devices.clear();
+    m_code.clear();
     // m_seenRequests survives the outage: requests still pending when the
     // server comes back were already announced.
     if (state() != before)

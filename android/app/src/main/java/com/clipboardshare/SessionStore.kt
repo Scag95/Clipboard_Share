@@ -6,7 +6,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/** Persistent device identity, per-host session tokens, and remembered hosts. */
+/** Persistent device identity, per-host session tokens with their certificate pins, and remembered hosts. */
 class SessionStore(context: Context) {
     data class LastHost(
         val name: String,
@@ -19,6 +19,7 @@ class SessionStore(context: Context) {
         private const val LAST_HOSTS = "last_hosts"
         private const val SELECTED_HOST = "selected_host"
         private const val TOKEN_PREFIX = "token_"
+        private const val PIN_PREFIX = "pin_"
 
         fun hostKey(host: String, port: Int): String = "$host:$port"
     }
@@ -39,14 +40,31 @@ class SessionStore(context: Context) {
             else prefs.edit().putString(SELECTED_HOST, value).apply()
         }
 
-    fun getToken(hostKey: String): String? = prefs.getString(TOKEN_PREFIX + hostKey, null)
-
-    fun putToken(hostKey: String, token: String) {
-        prefs.edit().putString(TOKEN_PREFIX + hostKey, token).apply()
+    /**
+     * The token for [hostKey], only while the PC's certificate pin is stored with it (S6).
+     * A token saved before TLS has no pin: it is cleared here, so the phone pairs again.
+     */
+    fun getToken(hostKey: String): String? {
+        val token = prefs.getString(TOKEN_PREFIX + hostKey, null) ?: return null
+        if (CertPin.tokenUsable(token, getPin(hostKey))) return token
+        clearToken(hostKey)
+        return null
     }
 
+    /** SPKI SHA-256 fingerprint of the certificate the PC presented when it was paired. */
+    fun getPin(hostKey: String): String? = prefs.getString(PIN_PREFIX + hostKey, null)
+
+    /** Stores the token and the pin of the certificate that issued it, in one write. */
+    fun putSession(hostKey: String, token: String, pin: String) {
+        prefs.edit()
+            .putString(TOKEN_PREFIX + hostKey, token)
+            .putString(PIN_PREFIX + hostKey, pin)
+            .apply()
+    }
+
+    /** Forgets the token and its pin: the next pairing trusts the certificate it is shown. */
     fun clearToken(hostKey: String) {
-        prefs.edit().remove(TOKEN_PREFIX + hostKey).apply()
+        prefs.edit().remove(TOKEN_PREFIX + hostKey).remove(PIN_PREFIX + hostKey).apply()
     }
 
     fun getLastHosts(): List<LastHost> {

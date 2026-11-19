@@ -177,6 +177,27 @@ ApplicationWindow {
 
                 Section { text: qsTr("PAIRING REQUESTS") }
 
+                // The phone shows the same code while it waits: approve only
+                // when both match.
+                Label {
+                    objectName: "verificationCode"
+                    visible: backend.code !== ""
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    font.pixelSize: 15
+                    font.bold: true
+                    text: qsTr("Verification code: %1").arg(backend.code)
+                }
+                Label {
+                    visible: backend.code !== "" && backend.requests.length > 0
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: "#9aa0a6"
+                    font.pixelSize: 12
+                    text: qsTr("Approve only if the phone shows the same code.")
+                }
+
                 Label {
                     visible: backend.requests.length === 0
                     Layout.fillWidth: true

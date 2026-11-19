@@ -49,11 +49,11 @@ func TestServerPortPrefersNudgeAndFallsBack(t *testing.T) {
 }
 
 func TestPairNotificationUsesNudge(t *testing.T) {
-	title, body := pairNotification("Pixel 8")
+	title, body := pairNotification("Pixel 8", "6B86-B273-FF34")
 	if title != "Nudge" {
 		t.Fatalf("title = %q, want Nudge", title)
 	}
-	if want := "Pair request from Pixel 8 — nudge pair --last"; body != want {
+	if want := "Pair request from Pixel 8, code 6B86-B273-FF34 — nudge pair --last"; body != want {
 		t.Fatalf("body = %q, want %q", body, want)
 	}
 }
@@ -182,5 +182,39 @@ func TestPairClientCommandUnchanged(t *testing.T) {
 	}
 	if _, err := pairClientCommand([]string{"deny", "--request"}); err == nil {
 		t.Error("incomplete deny accepted")
+	}
+}
+
+// S5: `nudge pair list` shows the verification code first, then the lists
+// exactly as before.
+func TestPairListPrintsTheVerificationCodeFirst(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("NUDGE_STATE", filepath.Join(dir, "state.json"))
+	t.Setenv("NUDGE_CTL_SOCK", filepath.Join(dir, "ctl.sock"))
+	b := pair.NewBroker()
+	b.SetVerification("6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b", "6B86-B273-FF34")
+	control, err := pair.ListenControl(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { control.Close() })
+
+	var stdout, stderr bytes.Buffer
+	if code := runPairClient([]string{"list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr %q", code, stderr.String())
+	}
+	want := "Verification code: 6B86-B273-FF34\nPending requests:\n  (none)\nApproved devices:\n  (none)\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want %q", stdout.String(), stderr.String(), want)
+	}
+
+	// Other commands print only their message, as before.
+	stdout.Reset()
+	if code := runPairClient([]string{"--last"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("--last with nothing pending: exit %d, want 1", code)
+	}
+	if stdout.Len() != 0 || stderr.String() != "nudge pair: "+pair.ErrNotFound.Error()+"\n" {
+		t.Fatalf("--last stdout = %q, stderr = %q", stdout.String(), stderr.String())
 	}
 }

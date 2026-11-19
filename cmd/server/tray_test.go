@@ -11,14 +11,14 @@ import (
 )
 
 func TestTrayMenuStatusUsesRealPort(t *testing.T) {
-	got := trayMenuModel("18765", nil)
+	got := trayMenuModel("18765", "", nil)
 	if got.Status != "Escuchando en el puerto 18765" {
 		t.Fatalf("status = %q", got.Status)
 	}
 }
 
 func TestTrayMenuEmptyState(t *testing.T) {
-	got := trayMenuModel("8765", []pair.DeviceInfo{})
+	got := trayMenuModel("8765", "", []pair.DeviceInfo{})
 	want := trayMenu{Status: "Escuchando en el puerto 8765", Phones: []string{"Ningún teléfono emparejado"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("menu = %#v, want %#v", got, want)
@@ -31,7 +31,7 @@ func TestTrayMenuPhoneLinesSortedByName(t *testing.T) {
 		{ID: "b", Name: "Galaxy", IP: "192.168.1.30"},
 		{ID: "c", Name: "galaxy", IP: "192.168.1.10"},
 	}
-	got := trayMenuModel("8765", devices).Phones
+	got := trayMenuModel("8765", "", devices).Phones
 	want := []string{
 		"galaxy — 192.168.1.10",
 		"Galaxy — 192.168.1.30",
@@ -47,7 +47,7 @@ func TestTrayMenuSanitizesAndTruncatesLANText(t *testing.T) {
 		{ID: "x", Name: "  Evil\u202e\x00 \t phone" + strings.Repeat("n", 60), IP: strings.Repeat("1", 70)},
 		{ID: "y", Name: "\u200b\x07", IP: ""},
 	}
-	got := trayMenuModel("8765", devices).Phones
+	got := trayMenuModel("8765", "", devices).Phones
 	wantName := "Evil phone" + strings.Repeat("n", 29) + "…"
 	wantIP := strings.Repeat("1", 63) + "…"
 	want := []string{
@@ -67,7 +67,7 @@ func TestTrayMenuCapsLongList(t *testing.T) {
 	for i := 0; i < 13; i++ {
 		devices = append(devices, pair.DeviceInfo{ID: fmt.Sprint(i), Name: fmt.Sprintf("phone%02d", i), IP: fmt.Sprintf("10.0.0.%d", i)})
 	}
-	got := trayMenuModel("8765", devices).Phones
+	got := trayMenuModel("8765", "", devices).Phones
 	if len(got) != maxTrayPhones+1 {
 		t.Fatalf("len = %d: %q", len(got), got)
 	}
@@ -84,9 +84,27 @@ func TestTrayMenuExactlyCapHasNoOverflowLine(t *testing.T) {
 	for i := 0; i < maxTrayPhones; i++ {
 		devices = append(devices, pair.DeviceInfo{ID: fmt.Sprint(i), Name: fmt.Sprintf("p%02d", i), IP: "1.1.1.1"})
 	}
-	got := trayMenuModel("8765", devices).Phones
+	got := trayMenuModel("8765", "", devices).Phones
 	if len(got) != maxTrayPhones || strings.HasPrefix(got[len(got)-1], "y ") {
 		t.Fatalf("phones = %q", got)
+	}
+}
+
+func TestTrayMenuShowsVerificationCodeAfterStatus(t *testing.T) {
+	got := trayMenuModel("8765", "6B86-B273-FF34", nil)
+	want := trayMenu{
+		Status: "Escuchando en el puerto 8765",
+		Code:   "Código: 6B86-B273-FF34",
+		Phones: []string{"Ningún teléfono emparejado"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("menu = %#v, want %#v", got, want)
+	}
+}
+
+func TestTrayMenuWithoutCodeHasNoCodeLine(t *testing.T) {
+	if got := trayMenuModel("8765", "", nil).Code; got != "" {
+		t.Fatalf("code line = %q", got)
 	}
 }
 

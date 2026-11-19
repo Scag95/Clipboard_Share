@@ -6,8 +6,10 @@ servidor. Para instalar y usar, ver [linux.md](linux.md),
 
 ## Arquitectura
 
-- **Servidor en el PC (Go)**: expone una API HTTP local y se anuncia vía mDNS
-  (`_nudge._tcp`) para que el móvil lo descubra automáticamente.
+- **Servidor en el PC (Go)**: expone una API HTTPS local (certificado
+  autofirmado, ver [TLS y código de verificación](#tls-y-código-de-verificación))
+  y se anuncia vía mDNS (`_nudge._tcp`) para que el móvil lo descubra
+  automáticamente.
 - **Cliente Android**: descubre el servidor por mDNS, sincroniza el clipboard y
   hace de trackpad/teclado remoto.
 - **Panel de escritorio (Linux, Qt Quick)**: ventana + bandeja para aprobar
@@ -29,7 +31,8 @@ Nudge/
 │   ├── clipboard/     # clipboard del SO (Windows, X11, Wayland)
 │   ├── discovery/     # mDNS announce/browse
 │   ├── input/         # inyección de mouse/teclado (SendInput, uinput)
-│   └── pair/          # emparejamiento por identidad + socket de control
+│   ├── pair/          # emparejamiento por identidad + socket de control
+│   └── tlscert/       # certificado autofirmado, huella y código de verificación
 ├── android/           # app Android (Kotlin)
 ├── panel/             # panel de escritorio Linux (C++ / Qt Quick) y sus tests
 ├── pkgbuild/          # paquete Arch `nudge`, servicio de usuario, launcher, ícono
@@ -61,9 +64,11 @@ go mod tidy
 go run ./cmd/server   # o el binario, ver "Compilar los binarios"
 ```
 
-El servidor escucha en `:8765` (configurable con `NUDGE_PORT`; también
-`CLIPBOARD_SHARE_PORT` como respaldo) y se anuncia en la red local como
-`_nudge._tcp`.
+El servidor escucha con TLS en `:8765` (configurable con `NUDGE_PORT`;
+también `CLIPBOARD_SHARE_PORT` como respaldo) y se anuncia en la red local
+como `_nudge._tcp`. No sirve HTTP plano. Al arrancar registra el certificado y
+el código (`verification code: XXXX-XXXX-XXXX`). Para probarlo a mano:
+`curl -k https://127.0.0.1:8765/health`.
 
 ## Compilar los binarios
 
@@ -81,6 +86,10 @@ El zip de Windows se explica en
 [Generar el APK](android.md#generar-el-apk).
 
 ## API HTTP
+
+Todo va sobre HTTPS (`https://<pc>:8765/...`) y el WebSocket sobre WSS
+(`wss://<pc>:8765/ws/input`), TLS 1.2 o superior. Las rutas y la
+autenticación son las mismas que antes de TLS.
 
 `/health`, `/pair/request` y `/pair/status` son públicos. Los cuatro endpoints
 de `/clipboard/*` exigen el token de sesión que entrega `/pair/status` (o
@@ -133,20 +142,55 @@ sin aprobación. El estado (dispositivos y tokens) persiste en
 `~/.config/nudge/state.json` (`0600`; en Windows `%APPDATA%\nudge\state.json`)
 y sobrevive reinicios del servidor y del PC.
 
+## TLS y código de verificación
+
+- **Certificado**: el servidor guarda un único certificado autofirmado ECDSA
+  P-256 (CN `Nudge`, 20 años, serie aleatoria) en `tls.crt` y su clave PKCS#8
+  en `tls.key` (`0600`), en el mismo directorio que `state.json`
+  (`~/.config/nudge/` en Linux, `%APPDATA%\nudge\` en Windows; con
+  `NUDGE_STATE` van junto a ese archivo). Se genera en el primer arranque. Si
+  falta uno de los dos, no se puede leer, está corrupto o no forman pareja, se
+  genera otro y el log avisa (`warning: TLS certificate ... every phone has
+  to pair again`). Sin autoridad certificadora.
+- **Huella** (fingerprint): SHA-256 del SubjectPublicKeyInfo DER del
+  certificado, en hex minúscula (64 caracteres). Depende solo de la clave, así
+  que sobrevive a un certificado reemitido con la misma clave.
+- **Código de verificación**: los primeros 6 bytes de esa huella como 12
+  dígitos hex en mayúscula, en tres grupos de 4 unidos por `-`. Ejemplo (el
+  vector que fijan los tests de Go y de Android): la huella
+  `6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b` da
+  `6B86-B273-FF34`. Se calcula a mano con
+  `openssl x509 -in tls.crt -pubkey -noout | openssl pkey -pubin -outform der | sha256sum`.
+- **Dónde se ve**: `nudge pair list` lo imprime primero
+  (`Verification code: ...`); el comando `list` del socket de control lo
+  devuelve en `code` (y la huella en `fingerprint`); lo muestran también el
+  panel de Linux, la notificación de `notify-send` y la ventana Sí/No de
+  Windows.
+- **Pinning**: al emparejar, la app anota la huella del certificado que vio
+  en `/pair/request`, muestra el código para que el usuario lo compare con el
+  de la PC y guarda la huella (el pin) junto al token solo si la PC aprueba.
+  Después acepta únicamente un certificado con esa huella; si cambia, borra
+  token y pin de esa PC y pide emparejar de nuevo. El nombre de host no se
+  verifica: el pin identifica a la PC.
+- **Borrar la configuración**: borrar `tls.key` (o todo el directorio)
+  genera otro certificado con otra huella, así que cada teléfono tiene que
+  emparejarse de nuevo.
+
 ## Seguridad
 
-- **El clipboard HTTP no tiene autenticación**: cualquiera en la LAN puede
-  leerlo y escribirlo.
-- El control de input **sí** requiere token.
-- No hay TLS: el servidor usa HTTP y WebSocket planos, así que el token y los
-  eventos viajan sin cifrar por la LAN.
+- El clipboard (`/clipboard/*`) y el control de input requieren el token del
+  teléfono (`Authorization: Bearer` y `?token=` respectivamente).
+- Todo el tráfico (HTTP y el WebSocket de control remoto) va cifrado con TLS;
+  el token y los eventos ya no viajan en claro por la LAN. El primer contacto
+  (emparejar) confía en el certificado que ve, por eso hay que comparar el
+  código de verificación antes de aprobar.
 - Una solicitud de emparejamiento puede mandarla cualquiera en la LAN; por eso
   el panel nunca la aprueba solo ni abre su ventana por ella.
 
 ## Tests
 
 - Go: `go test ./...` (`internal/api`, `internal/clipboard`, `internal/input`,
-  `internal/pair`).
+  `internal/pair`, `internal/tlscert`).
 - Panel: `panel/bin/test` (Qt Test offscreen: backend contra un servidor
   falso, UI con clics y teclas reales, instancia única, inicio automático con
   un `systemctl` falso y directorios temporales).
@@ -179,7 +223,6 @@ y sobrevive reinicios del servidor y del PC.
 
 ### Conocido y sin resolver
 
-- El clipboard HTTP no está autenticado.
 - El sync celu → PC depende del texto de un log del sistema de Android y de un
   diálogo de consentimiento que solo el usuario puede aceptar.
 - La regla udev `uaccess` no está verificada.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -21,6 +23,7 @@ import (
 	"nudge/internal/discovery"
 	"nudge/internal/input"
 	"nudge/internal/pair"
+	"nudge/internal/tlscert"
 )
 
 func main() {
@@ -74,9 +77,10 @@ func serverPort() string {
 	return "8765"
 }
 
-// pairNotification returns the desktop notification shown for a new request.
-func pairNotification(deviceName string) (title, body string) {
-	return "Nudge", fmt.Sprintf("Pair request from %s — nudge pair --last", deviceName)
+// pairNotification returns the desktop notification shown for a new request;
+// code is the verification code the phone shows for the same certificate.
+func pairNotification(deviceName, code string) (title, body string) {
+	return "Nudge", fmt.Sprintf("Pair request from %s, code %s — nudge pair --last", deviceName, code)
 }
 
 func runServer() {
@@ -89,6 +93,17 @@ func runServer() {
 	if err != nil {
 		log.Fatalf("pairing state load failed: %v", err)
 	}
+
+	// The self-signed certificate lives next to the state file; phones pin its
+	// fingerprint and compare the code when pairing.
+	certDir := filepath.Dir(pair.StatePath())
+	cert, fingerprint, code, err := tlscert.LoadOrCreate(certDir, log.Printf)
+	if err != nil {
+		log.Fatalf("TLS certificate failed: %v", err)
+	}
+	pairer.SetVerification(fingerprint, code)
+	log.Printf("TLS certificate: %s", filepath.Join(certDir, tlscert.CertFile))
+	log.Printf("verification code: %s", code)
 
 	if err := clipboard.Init(); err != nil {
 		log.Fatalf("clipboard init failed: %v", err)
@@ -129,15 +144,16 @@ func runServer() {
 	api.AttachPairing(r, pairer)
 	api.AttachInputWS(r, pairer, input.New(), api.DefaultInputRate)
 	addr := ":" + port
-	srv := &http.Server{Addr: addr, Handler: r}
+	srv := &http.Server{Addr: addr, Handler: r, TLSConfig: serverTLSConfig(cert)}
 
 	serveErr := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		// HTTPS only: the certificate comes from TLSConfig, so no file paths.
+		if err := srv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}
 	}()
-	log.Printf("Nudge server listening on %s", addr)
+	log.Printf("Nudge server listening on %s (HTTPS)", addr)
 
 	// On Windows SIGINT is Ctrl+C/Ctrl+Break and SIGTERM is console close,
 	// logoff or shutdown; a windowsgui process gets neither and is simply
@@ -158,8 +174,14 @@ func runServer() {
 	}
 }
 
+// serverTLSConfig serves the one self-signed certificate with TLS 1.2 or later.
+func serverTLSConfig(cert tls.Certificate) *tls.Config {
+	return &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+}
+
 type pairClientResponse struct {
 	OK       bool               `json:"ok"`
+	Code     string             `json:"code"`
 	Error    string             `json:"error"`
 	Message  string             `json:"message"`
 	Requests []pair.RequestInfo `json:"requests"`
@@ -223,6 +245,9 @@ func pairClientCommand(args []string) (map[string]string, error) {
 }
 
 func printPairList(w io.Writer, response pairClientResponse) {
+	if response.Code != "" {
+		fmt.Fprintf(w, "Verification code: %s\n", response.Code)
+	}
 	fmt.Fprintln(w, "Pending requests:")
 	if len(response.Requests) == 0 {
 		fmt.Fprintln(w, "  (none)")

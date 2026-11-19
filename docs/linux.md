@@ -53,7 +53,11 @@ clic deliberado en el botón.
 
 Desde el panel podés:
 
-- **Aprobar / Rechazar** cada solicitud (caducan a los 90 s).
+- **Aprobar / Rechazar** cada solicitud (caducan a los 90 s). Arriba de las
+  solicitudes se ve el código de verificación de la PC
+  (`Verification code: XXXX-XXXX-XXXX`): aprobá solo si el teléfono muestra
+  el mismo. El código está siempre visible mientras el servidor corre,
+  también sin solicitudes pendientes.
 - **Revocar** un dispositivo emparejado (pide confirmación).
 - Ver el estado del servidor. Si no corre, el panel lo dice y sugiere
   `systemctl --user start nudge`.
@@ -108,16 +112,26 @@ el acceso venía del grupo `input`.
 
 1. En el teléfono, elegí el PC en la lista de inicio. Se abre el trackpad y,
    si es la primera vez, la app pide el emparejamiento.
-2. En el PC aparece una notificación y el panel muestra la solicitud: tocá
-   **Aprobar**.
-3. Listo. Las reconexiones siguientes son automáticas, también después de
+2. En el PC aparece una notificación (con el código de verificación) y el
+   panel muestra la solicitud.
+3. Compará el código: el teléfono muestra uno como `4F2A-91C7-0B3E` y el
+   panel (o `nudge pair list`, en su primera línea) tiene que mostrar el
+   mismo. Si coinciden, tocá **Aprobar**; si no, **Rechazar**.
+4. Listo. Las reconexiones siguientes son automáticas, también después de
    reiniciar el servidor o el PC.
+
+Si el PC ya conocía el teléfono (por ejemplo, al actualizar desde una
+versión sin cifrado o después del aviso "El certificado de la PC cambió"),
+le da acceso sin pedir aprobación. Entonces es el teléfono el que pregunta
+"¿La PC muestra el código …?": miralo en el panel o con `nudge pair list`
+y tocá **Sí, coincide** solo si es el mismo. Con **No** el teléfono no
+guarda nada y cancela el emparejamiento.
 
 El CLI sirve para lo mismo y es cómodo para scripts:
 
 ```bash
 nudge pair --last                 # aprueba el request más nuevo
-nudge pair list                   # ver pendientes y aprobados
+nudge pair list                   # código de verificación, pendientes y aprobados
 nudge pair revoke --device <id>   # quitar un dispositivo
 ```
 
@@ -131,6 +145,12 @@ bind = SUPER SHIFT, P, exec, nudge pair --last
 Si perdés un teléfono, usá **Revocar** en el panel (o
 `nudge pair revoke --device <id>`). Para resetear todo el emparejamiento,
 borrá `~/.config/nudge/state.json`.
+
+El tráfico con el teléfono va cifrado (HTTPS/WSS) con un certificado
+autofirmado que el servidor guarda en `~/.config/nudge/tls.crt` y
+`~/.config/nudge/tls.key`. El teléfono recuerda ese certificado al emparejar.
+Si borrás `tls.key` (o todo `~/.config/nudge`), el servidor genera otro y
+**cada teléfono tiene que emparejarse de nuevo**.
 
 ## Migración desde clipboard-share
 

@@ -101,6 +101,9 @@ type Broker struct {
 	pending   map[string]*pendingRequest
 	sequence  uint64
 	onRequest func(RequestInfo)
+	// The server certificate's identity, shown by `list` (see SetVerification).
+	fingerprint string
+	code        string
 }
 
 // NewBroker returns an empty broker using StatePath for persistence. Use Load
@@ -208,6 +211,21 @@ func cloneDevices(devices map[string]device) map[string]device {
 		cloned[id] = d
 	}
 	return cloned
+}
+
+// SetVerification records the TLS certificate's fingerprint and verification
+// code so the control socket's `list` can show them to the user.
+func (b *Broker) SetVerification(fingerprint, code string) {
+	b.mu.Lock()
+	b.fingerprint, b.code = fingerprint, code
+	b.mu.Unlock()
+}
+
+// Verification returns what SetVerification recorded.
+func (b *Broker) Verification() (fingerprint, code string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.fingerprint, b.code
 }
 
 // OnRequest registers a callback invoked outside the broker lock whenever a
@@ -479,11 +497,14 @@ type controlCommand struct {
 }
 
 type controlResponse struct {
-	OK       bool          `json:"ok"`
-	Error    string        `json:"error,omitempty"`
-	Message  string        `json:"message,omitempty"`
-	Requests []RequestInfo `json:"requests"`
-	Devices  []DeviceInfo  `json:"devices"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
+	// Code and Fingerprint are only set on `list`.
+	Code        string        `json:"code,omitempty"`
+	Fingerprint string        `json:"fingerprint,omitempty"`
+	Requests    []RequestInfo `json:"requests"`
+	Devices     []DeviceInfo  `json:"devices"`
 }
 
 // isSocketLike reports whether an existing control path may be a (stale)
@@ -584,7 +605,8 @@ func (b *Broker) control(command controlCommand) controlResponse {
 	switch command.Cmd {
 	case "list":
 		devices, requests := b.Snapshot()
-		return controlResponse{OK: true, Requests: requests, Devices: devices}
+		fingerprint, code := b.Verification()
+		return controlResponse{OK: true, Code: code, Fingerprint: fingerprint, Requests: requests, Devices: devices}
 	case "approve-last":
 		if err := b.ApproveLast(); err != nil {
 			return controlResponse{Error: err.Error()}
