@@ -108,7 +108,10 @@ jobs:
           & $nudge pair --last
           if ($LASTEXITCODE -ne 0) { throw "nudge pair --last exit $LASTEXITCODE" }
           $st = Invoke-RestMethod "http://127.0.0.1:8765/pair/status?id=$id"
-          if ($st.state -ne 'approved' -or -not $st.token) { throw "pair status: $($st | ConvertTo-Json -Compress)" }
+          if ($st.state -ne 'approved' -or -not $st.token) { throw "pair status: state=$($st.state) token present=$([bool]$st.token)" }
+          "::add-mask::$($st.token)"
+          # Steps do not share PowerShell variables; the clipboard step reads it from the env.
+          "NUDGE_TOKEN=$($st.token)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           'paired OK through the CLI'
 
       - name: Clipboard round trip
@@ -117,8 +120,13 @@ jobs:
             Add-Type -AssemblyName System.Windows.Forms
             [System.Windows.Forms.Clipboard]::Clear()
           } catch { "could not clear the clipboard: $_" }
+          if (-not $env:NUDGE_TOKEN) { throw 'NUDGE_TOKEN missing; the pairing step did not export it' }
+          $auth = @{ Authorization = "Bearer $env:NUDGE_TOKEN" }
+          $anon = Invoke-WebRequest http://127.0.0.1:8765/clipboard/text -SkipHttpErrorCheck
+          "no token -> $($anon.StatusCode)"
+          if ($anon.StatusCode -ne 401) { throw "clipboard without token should be 401, got $($anon.StatusCode)" }
           $before = Get-Clipboard -Raw
-          $empty = Invoke-WebRequest http://127.0.0.1:8765/clipboard/text -SkipHttpErrorCheck
+          $empty = Invoke-WebRequest http://127.0.0.1:8765/clipboard/text -Headers $auth -SkipHttpErrorCheck
           "empty clipboard -> $($empty.StatusCode) $($empty.Content)"
           if ($empty.StatusCode -ne 200) { throw 'empty clipboard should be 200 with empty text' }
           if ([string]::IsNullOrEmpty($before)) {
@@ -127,13 +135,13 @@ jobs:
           $text = 'hola desde CI ñ €'
           $json = @{ text = $text } | ConvertTo-Json -Compress
           $bytes = [Text.Encoding]::UTF8.GetBytes($json)
-          Invoke-WebRequest -Method Post -Uri http://127.0.0.1:8765/clipboard/text -Body $bytes -ContentType 'application/json; charset=utf-8' | Out-Null
-          $got = (Invoke-RestMethod http://127.0.0.1:8765/clipboard/text).text
+          Invoke-WebRequest -Method Post -Uri http://127.0.0.1:8765/clipboard/text -Headers $auth -Body $bytes -ContentType 'application/json; charset=utf-8' | Out-Null
+          $got = (Invoke-RestMethod http://127.0.0.1:8765/clipboard/text -Headers $auth).text
           if ($got -ne $text) { throw "server read back '$got'" }
           $os = Get-Clipboard -Raw
           if ($os.TrimEnd("`r", "`n") -ne $text) { throw "Windows clipboard has '$os'" }
           Set-Clipboard -Value 'puesto por Windows'
-          $got = (Invoke-RestMethod http://127.0.0.1:8765/clipboard/text).text
+          $got = (Invoke-RestMethod http://127.0.0.1:8765/clipboard/text -Headers $auth).text
           if ($got -ne 'puesto por Windows') { throw "server read '$got' from the Windows clipboard" }
           'clipboard OK'
 

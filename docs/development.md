@@ -82,6 +82,15 @@ El zip de Windows se explica en
 
 ## API HTTP
 
+`/health`, `/pair/request` y `/pair/status` son públicos. Los cuatro endpoints
+de `/clipboard/*` exigen el token de sesión que entrega `/pair/status` (o
+`/pair/request` para un dispositivo ya aprobado) en el header
+`Authorization: Bearer <token>` (nunca en la URL, que termina en los logs).
+Sin header, con otro esquema, con un token desconocido o revocado responden
+`401` con body `unauthorized` y `WWW-Authenticate: Bearer`, sin leer ni
+escribir el clipboard. El WebSocket `/ws/input` sigue recibiendo el mismo
+token como `?token=`.
+
 - `GET  /health`: estado del servidor.
 - `GET  /clipboard/text`: texto actual del clipboard (`{"text":""}` si no hay
   texto).

@@ -10,12 +10,6 @@ import (
 	"nudge/internal/input"
 )
 
-// TokenValidator checks session tokens issued through pairing (implemented
-// by internal/pair.Broker).
-type TokenValidator interface {
-	Validate(token string) bool
-}
-
 // DefaultInputRate is the per-connection event budget when none is given.
 const DefaultInputRate = 120
 
