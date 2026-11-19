@@ -113,10 +113,17 @@ jobs:
 
       - name: Clipboard round trip
         run: |
-          Set-Clipboard -Value $null -ErrorAction SilentlyContinue
+          try {
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.Clipboard]::Clear()
+          } catch { "could not clear the clipboard: $_" }
+          $before = Get-Clipboard -Raw
           $empty = Invoke-WebRequest http://127.0.0.1:8765/clipboard/text -SkipHttpErrorCheck
           "empty clipboard -> $($empty.StatusCode) $($empty.Content)"
           if ($empty.StatusCode -ne 200) { throw 'empty clipboard should be 200 with empty text' }
+          if ([string]::IsNullOrEmpty($before)) {
+            if (($empty.Content | ConvertFrom-Json).text -ne '') { throw 'empty clipboard should read as empty text' }
+          } else { "clipboard was not empty ('$before'); empty-text check skipped" }
           $text = 'hola desde CI ñ €'
           $json = @{ text = $text } | ConvertTo-Json -Compress
           $bytes = [Text.Encoding]::UTF8.GetBytes($json)
@@ -149,6 +156,9 @@ jobs:
           if (Get-Process -Name 'nudge-background' -ErrorAction SilentlyContinue) { throw 'server still running' }
           netsh advfirewall firewall show rule name="Nudge" | Out-Null
           if ($LASTEXITCODE -eq 0) { throw 'firewall rule still there' }
+          # netsh failing is the expected result here; do not let its exit
+          # code become the step's.
+          $global:LASTEXITCODE = 0
           'uninstall OK'
 
       - name: Server log on failure
