@@ -70,6 +70,38 @@ class CertPinTest {
         )
     }
 
+    // S8: a known device gets its token at once (200) and the PC shows no dialog.
+    @Test
+    fun anImmediateTokenWithoutAPinNeedsConfirmation() {
+        assertTrue(CertPin.needsConfirmation(storedPin = null, immediateToken = true))
+        assertTrue(CertPin.needsConfirmation(storedPin = "", immediateToken = true))
+    }
+
+    @Test
+    fun anImmediateTokenForAPinnedPcNeedsNoConfirmation() {
+        assertFalse(CertPin.needsConfirmation(storedPin = vectorFingerprint, immediateToken = true))
+    }
+
+    @Test
+    fun anApprovalOnThePcNeedsNoConfirmation() {
+        // 202: the code was already shown while waiting for the PC's approval.
+        assertFalse(CertPin.needsConfirmation(storedPin = null, immediateToken = false))
+        assertFalse(CertPin.needsConfirmation(storedPin = vectorFingerprint, immediateToken = false))
+    }
+
+    @Test
+    fun confirmationDialogTexts() {
+        assertEquals("Confirmá el código", CertPin.CONFIRM_TITLE)
+        assertEquals(
+            "¿La PC muestra el código 6B86-B273-FF34? Lo ves en el panel de Nudge (Linux), " +
+                "en el menú del ícono de la bandeja (Windows) o con `nudge pair list`.",
+            CertPin.confirmMessage(vectorFingerprint),
+        )
+        assertEquals("Sí, coincide", CertPin.CONFIRM_YES)
+        assertEquals("No", CertPin.CONFIRM_NO)
+        assertEquals("Emparejamiento cancelado: el código no coincide.", CertPin.CONFIRM_REJECTED_STATUS)
+    }
+
     @Test
     fun aTokenIsUsableOnlyTogetherWithAPin() {
         assertTrue(CertPin.tokenUsable("abc", vectorFingerprint))

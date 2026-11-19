@@ -47,17 +47,23 @@ func withTrayNotice(t trayHandle, next func(pair.RequestInfo)) func(pair.Request
 }
 
 // trayMenu is the informational, read-only content of the tray menu: the
-// status line, then (after a separator) one line per approved phone.
+// status line, the verification code line (when known), then (after a
+// separator) one line per approved phone.
 type trayMenu struct {
 	Status string
+	Code   string
 	Phones []string
 }
 
 // trayMenuModel builds the menu from the current approved devices, ordered
 // by name (case-insensitive), then IP, then ID, capped at maxTrayPhones
-// with a final "y N más" line.
-func trayMenuModel(port string, devices []pair.DeviceInfo) trayMenu {
+// with a final "y N más" line. code is the certificate verification code
+// (approvalBroker.Verification); empty means no code line.
+func trayMenuModel(port, code string, devices []pair.DeviceInfo) trayMenu {
 	menu := trayMenu{Status: "Escuchando en el puerto " + sanitizeDialogField(port, maxTrayPortChars)}
+	if code != "" {
+		menu.Code = "Código: " + code
+	}
 	if len(devices) == 0 {
 		menu.Phones = []string{trayNoPhones}
 		return menu

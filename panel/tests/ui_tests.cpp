@@ -129,6 +129,15 @@ private slots:
         QCOMPARE(itemWithText(s.window, text)->property("textFormat").toInt(), int(Qt::PlainText));
     }
 
+    // S8: the code stays visible with no pending requests, so the user can
+    // check it when a known phone asks to confirm it.
+    void theVerificationCodeIsShownWithNoPendingRequests() {
+        Session s(m_path, [](FakeServer &srv) { srv.code = "6B86-B273-FF34"; });
+        QVERIFY(s.window);
+        QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, "No requests. Open Nudge on your phone and pick this computer.") != nullptr, 3000);
+        QVERIFY(itemWithText(s.window, "Verification code: 6B86-B273-FF34") != nullptr);
+    }
+
     void noCodeIsShownWithoutOne() {
         Session s(m_path, [](FakeServer &srv) { srv.requests = {request("r8", "Pixel", "192.168.0.13")}; });
         QTRY_VERIFY_WITH_TIMEOUT(itemWithText(s.window, "Approve") != nullptr, 3000);

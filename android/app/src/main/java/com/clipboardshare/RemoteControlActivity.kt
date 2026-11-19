@@ -17,6 +17,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +25,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 /**
  * Remote mouse, keyboard, and clipboard for the host selected on the home screen.
@@ -361,6 +364,14 @@ class RemoteControlActivity : AppCompatActivity() {
             }
             when (result) {
                 is PairingClient.RequestResult.Approved -> {
+                    // A known device gets its token without an approval dialog on the PC:
+                    // without a pin, the user confirms the code before it is pinned (S8).
+                    if (CertPin.needsConfirmation(pin, immediateToken = true) &&
+                        !confirmCode(result.fingerprint)
+                    ) {
+                        showConnect(CertPin.CONFIRM_REJECTED_STATUS)
+                        return@launch
+                    }
                     store.putSession(hostKey, result.token, result.fingerprint)
                     // The clipboard sync idles without a token: start it now that there is one.
                     ClipboardSyncService.ensureStarted(this@RemoteControlActivity)
@@ -388,6 +399,24 @@ class RemoteControlActivity : AppCompatActivity() {
             }
         }
     }
+
+    /**
+     * Asks whether the PC shows the code of [fingerprint]; true only for "Sí, coincide".
+     * "No" and any dismissal answer false. Cancelling the job (cancel, a new request or
+     * the activity being destroyed) dismisses the dialog, so it never outlives the window.
+     */
+    private suspend fun confirmCode(fingerprint: String): Boolean =
+        suspendCancellableCoroutine { cont ->
+            val dialog = AlertDialog.Builder(this)
+                .setTitle(CertPin.CONFIRM_TITLE)
+                .setMessage(CertPin.confirmMessage(fingerprint))
+                .setPositiveButton(CertPin.CONFIRM_YES) { _, _ -> if (cont.isActive) cont.resume(true) }
+                .setNegativeButton(CertPin.CONFIRM_NO) { _, _ -> if (cont.isActive) cont.resume(false) }
+                .create()
+            dialog.setOnDismissListener { if (cont.isActive) cont.resume(false) }
+            cont.invokeOnCancellation { runOnUiThread { dialog.dismiss() } }
+            dialog.show()
+        }
 
     /** Polls with only the certificate /pair/request saw; its pin is stored on approval. */
     private suspend fun pollPairingStatus(

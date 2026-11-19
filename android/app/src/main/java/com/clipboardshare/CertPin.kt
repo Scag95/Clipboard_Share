@@ -10,6 +10,12 @@ import java.security.cert.X509Certificate
 object CertPin {
     const val MISMATCH_STATUS = "El certificado de la PC cambió. Emparejala de nuevo."
 
+    // S8: confirmation of the code when a known device gets its token without approval.
+    const val CONFIRM_TITLE = "Confirmá el código"
+    const val CONFIRM_YES = "Sí, coincide"
+    const val CONFIRM_NO = "No"
+    const val CONFIRM_REJECTED_STATUS = "Emparejamiento cancelado: el código no coincide."
+
     /** How a connection treats the certificate it was shown. */
     enum class Decision {
         /** No pin stored yet: trust on first use, protected by the code comparison. */
@@ -50,6 +56,19 @@ object CertPin {
     /** Shown under the waiting text so the user compares it with the code on the PC. */
     fun waitingCodeText(fingerprintHex: String): String =
         "Código: ${code(fingerprintHex)}. Comprobá que la PC muestre el mismo."
+
+    /**
+     * A token that arrives at once (HTTP 200: the PC already knew this phone, so it showed
+     * no approval dialog) for a PC without a stored pin must not be pinned silently: the
+     * user confirms the code first (S8). With a pin, or after an approval on the PC, no.
+     */
+    fun needsConfirmation(storedPin: String?, immediateToken: Boolean): Boolean =
+        immediateToken && storedPin.isNullOrEmpty()
+
+    /** The confirmation question, with where the PC shows its code. */
+    fun confirmMessage(fingerprintHex: String): String =
+        "¿La PC muestra el código ${code(fingerprintHex)}? Lo ves en el panel de Nudge (Linux), " +
+            "en el menú del ícono de la bandeja (Windows) o con `nudge pair list`."
 
     /** A token is only used together with the pin of the PC that issued it. */
     fun tokenUsable(token: String?, pin: String?): Boolean =

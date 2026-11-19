@@ -80,6 +80,15 @@ clipboard con la app cerrada hacen falta dos comandos de `adb`, explicados en
    PC. Si perdés el teléfono, lo revocás desde el panel o con
    `nudge pair revoke`.
 
+El código de la PC se puede ver en cualquier momento, haya o no solicitudes:
+en el panel de Nudge (Linux), en el menú del ícono de la bandeja (Windows,
+clic derecho: `Código: XXXX-XXXX-XXXX`) o con `nudge pair list`. Si la PC ya
+conocía el teléfono (por ejemplo, al actualizar desde una versión sin
+cifrado o después del aviso "El certificado de la PC cambió"), te da acceso
+sin ventana de aprobación; entonces el celu pregunta "¿La PC muestra el
+código …?" antes de guardarla: tocá **Sí, coincide** solo si es el mismo;
+con **No** no se guarda nada y el emparejamiento se cancela.
+
 Si borrás la configuración del servidor (o solo su clave, `tls.key`), la PC
 genera otro certificado y cada teléfono tiene que emparejarse de nuevo.
 

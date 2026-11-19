@@ -56,7 +56,8 @@ Desde el panel podés:
 - **Aprobar / Rechazar** cada solicitud (caducan a los 90 s). Arriba de las
   solicitudes se ve el código de verificación de la PC
   (`Verification code: XXXX-XXXX-XXXX`): aprobá solo si el teléfono muestra
-  el mismo.
+  el mismo. El código está siempre visible mientras el servidor corre,
+  también sin solicitudes pendientes.
 - **Revocar** un dispositivo emparejado (pide confirmación).
 - Ver el estado del servidor. Si no corre, el panel lo dice y sugiere
   `systemctl --user start nudge`.
@@ -118,6 +119,13 @@ el acceso venía del grupo `input`.
    mismo. Si coinciden, tocá **Aprobar**; si no, **Rechazar**.
 4. Listo. Las reconexiones siguientes son automáticas, también después de
    reiniciar el servidor o el PC.
+
+Si el PC ya conocía el teléfono (por ejemplo, al actualizar desde una
+versión sin cifrado o después del aviso "El certificado de la PC cambió"),
+le da acceso sin pedir aprobación. Entonces es el teléfono el que pregunta
+"¿La PC muestra el código …?": miralo en el panel o con `nudge pair list`
+y tocá **Sí, coincide** solo si es el mismo. Con **No** el teléfono no
+guarda nada y cancela el emparejamiento.
 
 El CLI sirve para lo mismo y es cómodo para scripts:
 
