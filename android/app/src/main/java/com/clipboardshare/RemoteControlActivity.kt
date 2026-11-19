@@ -354,6 +354,8 @@ class RemoteControlActivity : AppCompatActivity() {
             when (result) {
                 is PairingClient.RequestResult.Approved -> {
                     store.putToken(hostKey, result.token)
+                    // The clipboard sync idles without a token: start it now that there is one.
+                    ClipboardSyncService.ensureStarted(this@RemoteControlActivity)
                     connect(isAuthRetry = automatic)
                 }
                 is PairingClient.RequestResult.Pending -> {
@@ -386,6 +388,8 @@ class RemoteControlActivity : AppCompatActivity() {
                 is PairingClient.StatusResult.Approved -> {
                     // Status returns the token once, so persist it before opening the socket.
                     store.putToken(hostKey, result.token)
+                    // The clipboard sync idles without a token: start it now that there is one.
+                    ClipboardSyncService.ensureStarted(this@RemoteControlActivity)
                     connect(isAuthRetry = automatic)
                     return
                 }
