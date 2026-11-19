@@ -8,11 +8,15 @@ Test the Nudge Windows build (branch feat/windows-build, base db40efb) without a
 - S4: Real bugs found are fixed with a test where one is meaningful; Linux behavior unchanged (`go build ./... && go vet ./... && go test ./...` still pass on Linux).
 
 ## Tasks
-- T1 (S2) route: inline — install Wine, run Windows tests under Wine, smoke test. Commit: n/a (no source change unless bugs).
-- T2 (S3) route: inline — .github/workflows/windows.yml; push the feature branch and watch the run. Commit: pending.
-- T3 (S4) route: inline — fix bugs found by T1/T2. Commit: pending.
+- [x] T1 (S2) route: inline — install Wine, run Windows tests under Wine, smoke test. Commit: 5e04c7c (test portability).
+- [x] T2 (S3) route: inline — .github/workflows/windows.yml; push the feature branch and watch the run. Commit: c21420b; run 44566559426.
+- [x] T3 (S4) route: inline — fix bugs found by T1/T2 and native review advisories R3-001/R3-002. Commits: 8a26dc9, 3f52a53; run 44567263310 green.
 
 ## Log
 - L1: Vamos a ahora con la app de windows, tengo un ordenador con windows. podemos conectarnos por ssh y puedas hacer pruebas con eso?
 - L2: Alguna otra manera de hacerlo en windows sin tener windows?
 - L3: Vamos con tu recomendación. sudo no te va  pedir contraseña por 15 minutos. adelante.
+- L4 (evidence, Wine 11.20): Windows-compiled tests pass except 3 AF_UNIX control-socket tests (WSAEAFNOSUPPORT 10047, Wine limitation). nudge-background.exe under Wine: logs to %APPDATA%\nudge\nudge.log, keeps HTTP up when the socket fails, pairing dialog shows sanitized text with No as default; Enter denies, BM_CLICK on Yes approves with a token; clipboard text round trip with ñ € works. Empty-clipboard GET returned 500 "Success." under Wine (Wine clipboard bridge advertised text it could not deliver).
+- L5 (evidence, run 44566559426 on windows-latest): go vet + go test pass (including AF_UNIX tests); release zip installs via the launcher, server/health, ctl.sock, `nudge pair list` / `--last`, clipboard round trip all pass; `Uninstall Nudge.cmd` failed: %~dp0 recomputed after `cd /d %USERPROFILE%` when started through a quoted relative path.
+- L6 (native review review-2c70fd5ef402f844, approved): advisories R3-001 (netsh exit code leaks into the uninstall check step) and R3-002 (empty-clipboard check does not assert the body) fixed in T3; R1-001, R1-002, R3-003, R3-004 left as follow-ups or not applicable.
+- L7 (evidence, run 44567263310 on windows-latest, all jobs green): install OK, paired OK through the CLI, empty clipboard -> 200 {"text":""} (the clear succeeded, the empty-body check ran), clipboard OK, uninstall OK. Native review review-9101ec081241e753 approved 8a26dc9..3f52a53 with one advisory (the empty-body check can be skipped if the clipboard cannot be cleared; it was not skipped in this run). Independent verifier unavailable (quota), not retried.
