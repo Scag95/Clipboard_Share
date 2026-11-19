@@ -242,6 +242,37 @@ y sobrevive reinicios del servidor y del PC.
 - Windows: el workflow [`windows.yml`](../.github/workflows/windows.yml) corre
   la suite de Go en `windows-latest` y prueba el zip de punta a punta.
 
+## Publicar una versión
+
+Las releases las arma el workflow
+[`release.yml`](../.github/workflows/release.yml) al pushear un tag `v*`:
+compila el paquete de Arch, el zip de Windows y el APK firmado, genera
+`SHA256SUMS` y publica la release `Nudge <versión>` con las notas de
+`CHANGELOG.md`.
+
+1. Subí la versión en los tres lugares, que tienen que coincidir con el tag
+   (si no, el job `check` falla y dice cuál no coincide):
+   `Version` en `cmd/server/version.go`, `versionName` (y `versionCode`) en
+   `android/app/build.gradle.kts`, y `pkgver` en `pkgbuild/PKGBUILD` con
+   `pkgrel=1`. En `pkgver` el `-` se escribe `_` (`1.1.0-rc1` →
+   `1.1.0_rc1`).
+2. En `CHANGELOG.md`, agregá la sección `## [<versión>] - <fecha>`: de ahí
+   salen las notas; si falta, la release no se publica.
+3. Una sola vez, cargá los secrets del repositorio (Settings → Secrets and
+   variables → Actions): `NUDGE_KEYSTORE_B64` (el `.jks` en base64:
+   `base64 -w0 nudge-release.jks`), `NUDGE_KEYSTORE_PASSWORD` y
+   `NUDGE_KEY_PASSWORD` (alias `nudge`). Sin ellos un tag falla con
+   "signing secrets not configured".
+4. Commiteá, y pusheá el tag: `git tag v1.0.0 && git push origin v1.0.0`.
+   Un tag con `-` (`v1.1.0-rc1`) se publica como pre-release.
+
+**Prueba en seco**: Actions → release → Run workflow (o
+`gh workflow run release.yml --ref <rama>`). Con `dry_run` en `true` (por
+defecto) compila todo y deja los archivos como artifacts del run, sin crear
+ni tocar ninguna release; si faltan los secrets, el APK sale sin firmar
+(`nudge-<versión>-unsigned.apk`) y el run lo avisa. Con `dry_run` en `false`
+tampoco publica, pero exige el APK firmado como un tag.
+
 ## Estado del proyecto
 
 - Servidor Go con clipboard real de Linux (texto + imagen; en Wayland vía
