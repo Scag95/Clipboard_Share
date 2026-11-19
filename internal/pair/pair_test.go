@@ -22,7 +22,7 @@ func newTestBroker(t *testing.T) *Broker {
 
 func approvedDevice(t *testing.T, b *Broker, id, ip string) (requestID, token string) {
 	t.Helper()
-	req, err := b.Request(id, "Pixel 8", ip)
+	req, err := b.Request(id, "Pixel 8", ip, "")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
@@ -44,7 +44,7 @@ func approvedDevice(t *testing.T, b *Broker, id, ip string) (requestID, token st
 
 func TestRequestApproveStatusTokenOnce(t *testing.T) {
 	b := newTestBroker(t)
-	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10")
+	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestRequestApproveStatusTokenOnce(t *testing.T) {
 func TestKnownReissuesTokenAndSurvivesReload(t *testing.T) {
 	b := newTestBroker(t)
 	_, oldToken := approvedDevice(t, b, "device-1", "192.0.2.10")
-	known, err := b.Request("device-1", "Pixel 8 Pro", "192.0.2.20")
+	known, err := b.Request("device-1", "Pixel 8 Pro", "192.0.2.20", oldToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,16 +151,16 @@ func TestPendingLimitExpiryAndDeny(t *testing.T) {
 
 	requestIDs := make([]string, 0, MaxPendingPerIP)
 	for i := 0; i < MaxPendingPerIP; i++ {
-		req, err := b.Request(fmt.Sprintf("device-%d", i), "Phone", "192.0.2.10")
+		req, err := b.Request(fmt.Sprintf("device-%d", i), "Phone", "192.0.2.10", "")
 		if err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
 		requestIDs = append(requestIDs, req.RequestID)
 	}
-	if _, err := b.Request("device-overflow", "Phone", "192.0.2.10"); !errors.Is(err, ErrTooManyPending) {
+	if _, err := b.Request("device-overflow", "Phone", "192.0.2.10", ""); !errors.Is(err, ErrTooManyPending) {
 		t.Fatalf("sixth request error = %v, want ErrTooManyPending", err)
 	}
-	if _, err := b.Request("device-other-ip", "Phone", "192.0.2.11"); err != nil {
+	if _, err := b.Request("device-other-ip", "Phone", "192.0.2.11", ""); err != nil {
 		t.Fatalf("other IP must have an independent limit: %v", err)
 	}
 	if err := b.Deny(requestIDs[1]); err != nil {
@@ -175,7 +175,7 @@ func TestPendingLimitExpiryAndDeny(t *testing.T) {
 	if err := b.Approve(requestIDs[0]); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("approving expired request error = %v, want ErrNotFound", err)
 	}
-	if _, err := b.Request("device-after-expiry", "Phone", "192.0.2.10"); err != nil {
+	if _, err := b.Request("device-after-expiry", "Phone", "192.0.2.10", ""); err != nil {
 		t.Fatalf("expired requests must not count toward the limit: %v", err)
 	}
 	status, err = b.Status(requestIDs[1], "192.0.2.10")
@@ -186,11 +186,11 @@ func TestPendingLimitExpiryAndDeny(t *testing.T) {
 
 func TestApproveLastUsesNewestPending(t *testing.T) {
 	b := newTestBroker(t)
-	first, err := b.Request("device-1", "First", "192.0.2.10")
+	first, err := b.Request("device-1", "First", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := b.Request("device-2", "Second", "192.0.2.10")
+	second, err := b.Request("device-2", "Second", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,11 +205,11 @@ func TestApproveLastUsesNewestPending(t *testing.T) {
 	}
 }
 
-func TestRequestNotificationOnlyForNewDevices(t *testing.T) {
+func TestRequestNotificationSkipsOnlyTokenAuthenticatedRepairs(t *testing.T) {
 	b := newTestBroker(t)
 	notified := make(chan RequestInfo, 2)
 	b.OnRequest(func(req RequestInfo) { notified <- req })
-	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10")
+	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,23 +224,39 @@ func TestRequestNotificationOnlyForNewDevices(t *testing.T) {
 	if err := b.Approve(req.RequestID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Request("device-1", "Pixel 8", "192.0.2.10"); err != nil {
+	status, err := b.Status(req.RequestID, "192.0.2.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Request("device-1", "Pixel 8", "192.0.2.10", status.Token); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case got := <-notified:
-		t.Fatalf("known re-pair triggered notification: %+v", got)
+		t.Fatalf("token-authenticated re-pair triggered notification: %+v", got)
 	default:
+	}
+	repair, err := b.Request("device-1", "Pixel 8", "192.0.2.10", "")
+	if err != nil || repair.RequestID == "" || repair.Token != "" {
+		t.Fatalf("known re-pair without token = %+v, err = %v; want pending", repair, err)
+	}
+	select {
+	case got := <-notified:
+		if got.RequestID != repair.RequestID || got.ID != "device-1" {
+			t.Fatalf("notification = %+v", got)
+		}
+	default:
+		t.Fatal("known re-pair without token did not notify")
 	}
 }
 
 func TestControlSocketCommandsAndTokenPrivacy(t *testing.T) {
 	b := newTestBroker(t)
-	first, err := b.Request("device-1", "First", "192.0.2.10")
+	first, err := b.Request("device-1", "First", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := b.Request("device-2", "Second", "192.0.2.11")
+	second, err := b.Request("device-2", "Second", "192.0.2.11", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +339,7 @@ func TestControlListCarriesTheVerificationCode(t *testing.T) {
 	if gotFP, gotCode := b.Verification(); gotFP != fp || gotCode != "6B86-B273-FF34" {
 		t.Fatalf("Verification() = %q, %q", gotFP, gotCode)
 	}
-	if _, err := b.Request("device-1", "First", "192.0.2.10"); err != nil {
+	if _, err := b.Request("device-1", "First", "192.0.2.10", ""); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CLIPBOARD_SHARE_CTL_SOCK", filepath.Join(t.TempDir(), "ctl.sock"))

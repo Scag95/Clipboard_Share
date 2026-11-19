@@ -38,7 +38,7 @@ func newApprovalBroker(t *testing.T) (*pair.Broker, *fakeClock) {
 
 func requestPairing(t *testing.T, b *pair.Broker, id, name, ip string) pair.RequestInfo {
 	t.Helper()
-	res, err := b.Request(id, name, ip)
+	res, err := b.Request(id, name, ip, "")
 	if err != nil {
 		t.Fatalf("Request(%s): %v", id, err)
 	}

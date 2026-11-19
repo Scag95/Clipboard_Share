@@ -15,7 +15,7 @@ import (
 // Pairer starts device pairing and polls its state (implemented by
 // internal/pair.Broker).
 type Pairer interface {
-	Request(id, name, ip string) (pair.RequestResult, error)
+	Request(id, name, ip, presentedToken string) (pair.RequestResult, error)
 	Status(requestID, ip string) (pair.StatusResult, error)
 }
 
@@ -25,9 +25,11 @@ type pairRequest struct {
 }
 
 // AttachPairing registers device-identity pairing endpoints. POST
-// /pair/request returns 200 with a rotated token for known devices, 202 with
-// a requestId for new devices, and 429 when a source IP has too many pending
-// requests. GET /pair/status?id=... is source-IP bound and returns approval
+// /pair/request returns 200 with a rotated token only for a known device that
+// sends its own current token as `Authorization: Bearer <token>`; any other
+// request (new device, or known device without its valid token) gets 202 with
+// a requestId and waits for approval on the PC; 429 when a source IP has too
+// many pending requests. GET /pair/status?id=... is source-IP bound and returns approval
 // tokens only once.
 func AttachPairing(r *mux.Router, p Pairer) {
 	h := &pairHandlers{pairer: p}
@@ -49,7 +51,9 @@ func (h *pairHandlers) request(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "id and name are required", http.StatusBadRequest)
 		return
 	}
-	result, err := h.pairer.Request(req.ID, req.Name, remoteIP(r))
+	// Absent or malformed header -> "" -> the request needs approval.
+	presented, _ := bearerToken(r.Header.Get("Authorization"))
+	result, err := h.pairer.Request(req.ID, req.Name, remoteIP(r), presented)
 	if errors.Is(err, pair.ErrTooManyPending) {
 		http.Error(w, "too many pending pair requests from this IP", http.StatusTooManyRequests)
 		return

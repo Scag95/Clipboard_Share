@@ -163,15 +163,25 @@ object PairingClient {
 
     /**
      * Asks the PC for access. With a [pin] (a known PC renewing its token) only that
-     * certificate is accepted; with none, the presented certificate is captured.
+     * certificate is accepted and the stored [token], if any, is sent as
+     * `Authorization: Bearer` so the PC renews it without approval (#21); with no pin,
+     * the presented certificate is captured and no token is sent.
      */
-    fun request(serverUrl: String, pin: String?, deviceId: String, deviceName: String): RequestResult {
+    fun request(
+        serverUrl: String,
+        pin: String?,
+        token: String?,
+        deviceId: String,
+        deviceName: String,
+    ): RequestResult {
         val body = JSONObject().put("id", deviceId).put("name", deviceName).toString()
             .toRequestBody("application/json".toMediaType())
         // A fresh SSLContext per request: the handshake is always checked, never resumed.
         val pinned = PinnedTls.client(http, pin)
         return try {
-            val request = Request.Builder().url("$serverUrl/pair/request").post(body).build()
+            val builder = Request.Builder().url("$serverUrl/pair/request").post(body)
+            PairingAuth.requestHeaderValue(token, pin)?.let { builder.header(ClipboardAuth.HEADER_NAME, it) }
+            val request = builder.build()
             pinned.http.newCall(request).execute().use { resp ->
                 val seen = seenFingerprint(resp, pinned) ?: return@use RequestResult.Failed
                 when (resp.code) {

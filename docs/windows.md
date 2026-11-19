@@ -48,12 +48,14 @@ una terminal nueva: `nudge pair list` (la primera línea es
 `Verification code: ...`) y `nudge pair --last`.
 
 El código también está siempre en el menú del ícono de la bandeja (ver
-abajo). Si la PC ya conocía el teléfono (por ejemplo, al actualizar desde
-una versión sin cifrado o después del aviso "El certificado de la PC
-cambió"), le da acceso sin ventana Sí/No; entonces el teléfono pregunta
-"¿La PC muestra el código …?": tocá **Sí, coincide** solo si es el mismo
-que ves en la bandeja o con `nudge pair list`. Con **No** el teléfono no
-guarda nada y cancela el emparejamiento.
+abajo). Un teléfono que la PC ya conocía solo se reconecta sin ventana
+Sí/No si presenta su token vigente por la conexión cifrada; si no lo tiene
+(por ejemplo, después del aviso "El certificado de la PC cambió"), vuelve a
+aparecer la ventana Sí/No con el código, como para un teléfono nuevo. Si
+una PC con una versión anterior de Nudge igual le da acceso sin ventana,
+el teléfono pregunta "¿La PC muestra el código …?": tocá **Sí, coincide**
+solo si es el mismo que ves en la bandeja o con `nudge pair list`. Con
+**No** el teléfono no guarda nada y cancela el emparejamiento.
 
 El tráfico con el teléfono va cifrado (HTTPS/WSS) con un certificado
 autofirmado que el servidor guarda en `%APPDATA%\nudge\tls.crt` y
