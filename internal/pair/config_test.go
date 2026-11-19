@@ -4,15 +4,23 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
-// tempHome points HOME at a fresh directory and clears every path override so
-// the default locations are exercised without touching the real ~/.config.
+// tempHome points the home directory (HOME, and USERPROFILE for Windows) at a
+// fresh directory and clears every path override so the default locations are
+// exercised without touching the real config. It pins the Linux path rules,
+// which these tests assert on every host; Windows tests re-pin with
+// fakePlatform.
 func tempHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	prevOS := hostOS
+	hostOS = "linux"
+	t.Cleanup(func() { hostOS = prevOS })
 	for _, name := range []string{"NUDGE_STATE", "CLIPBOARD_SHARE_STATE", "NUDGE_CTL_SOCK", "CLIPBOARD_SHARE_CTL_SOCK"} {
 		t.Setenv(name, "")
 	}
@@ -95,9 +103,7 @@ func assertStateDir(t *testing.T, dir, content string) {
 	if err != nil {
 		t.Fatalf("stat %s: %v", dir, err)
 	}
-	if info.Mode().Perm() != 0o700 {
-		t.Fatalf("%s mode = %v, want 0700", dir, info.Mode().Perm())
-	}
+	assertPerm(t, dir, info, 0o700)
 	file := filepath.Join(dir, "state.json")
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -110,8 +116,18 @@ func assertStateDir(t *testing.T, dir, content string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finfo.Mode().Perm() != 0o600 {
-		t.Fatalf("%s mode = %v, want 0600", file, finfo.Mode().Perm())
+	assertPerm(t, file, finfo, 0o600)
+}
+
+// assertPerm checks Unix permission bits; Windows has no such bits (os.Chmod
+// only toggles read-only), so it is skipped there.
+func assertPerm(t *testing.T, path string, info os.FileInfo, want os.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s mode = %v, want %v", path, got, want)
 	}
 }
 
@@ -204,6 +220,9 @@ func TestMigrateLegacyConfigWithNeitherCreatesNothing(t *testing.T) {
 func TestMigrateLegacyConfigRenameFailureLeavesOldDir(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits cannot block a rename on Windows")
 	}
 	home := tempHome(t)
 	configDir := filepath.Join(home, ".config")
@@ -386,6 +405,9 @@ func TestMigrateLegacyConfigSkipsWhenStateOverrideReachesLegacyDirViaSymlink(t *
 	writeStateDir(t, oldDir, "old")
 	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(oldDir, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlinks need Developer Mode or admin on Windows: %v", err)
+		}
 		t.Fatal(err)
 	}
 	t.Setenv("NUDGE_STATE", filepath.Join(link, "state.json"))

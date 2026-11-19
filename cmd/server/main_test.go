@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -89,6 +90,9 @@ func TestPairClientUnreachableServerMessage(t *testing.T) {
 
 func legacyOnlyHome(t *testing.T) (home, oldDir string) {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("the legacy clipboard-share config only exists on Linux")
+	}
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	for _, name := range []string{"NUDGE_STATE", "CLIPBOARD_SHARE_STATE", "NUDGE_CTL_SOCK", "CLIPBOARD_SHARE_CTL_SOCK"} {
