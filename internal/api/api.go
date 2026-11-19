@@ -23,14 +23,16 @@ type TextPayload struct {
 	Text string `json:"text"`
 }
 
-func NewRouter(store Store) *mux.Router {
+// NewRouter serves /health (public) and the clipboard routes, which require
+// `Authorization: Bearer <token>` accepted by v.
+func NewRouter(store Store, v TokenValidator) *mux.Router {
 	r := mux.NewRouter()
 	h := &handlers{store: store}
 	r.HandleFunc("/health", h.health).Methods("GET")
-	r.HandleFunc("/clipboard/text", h.getText).Methods("GET")
-	r.HandleFunc("/clipboard/text", h.setText).Methods("POST")
-	r.HandleFunc("/clipboard/image", h.getImage).Methods("GET")
-	r.HandleFunc("/clipboard/image", h.setImage).Methods("POST")
+	r.HandleFunc("/clipboard/text", requireToken(v, h.getText)).Methods("GET")
+	r.HandleFunc("/clipboard/text", requireToken(v, h.setText)).Methods("POST")
+	r.HandleFunc("/clipboard/image", requireToken(v, h.getImage)).Methods("GET")
+	r.HandleFunc("/clipboard/image", requireToken(v, h.setImage)).Methods("POST")
 	return r
 }
 

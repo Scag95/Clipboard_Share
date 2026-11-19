@@ -125,7 +125,7 @@ func runServer() {
 	// that calls the broker directly, so it works without the socket.
 	pairer.OnRequest(withTrayNotice(tray, pairRequestHandler(pairer, log.Printf)))
 
-	r := api.NewRouter(clipboardStore{})
+	r := api.NewRouter(clipboardStore{}, pairer)
 	api.AttachPairing(r, pairer)
 	api.AttachInputWS(r, pairer, input.New(), api.DefaultInputRate)
 	addr := ":" + port
