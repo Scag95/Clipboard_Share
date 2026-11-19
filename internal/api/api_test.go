@@ -44,7 +44,7 @@ type testServer struct {
 
 func newTestServer(t *testing.T) (*testServer, *fakeStore) {
 	t.Helper()
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	b := pair.NewBroker()
 	store := &fakeStore{}
 	srv := httptest.NewServer(NewRouter(store, b))

@@ -30,14 +30,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
-/**
- * mDNS types the home screen browses: the current Nudge type and the
- * pre-rename one, so servers that have not been updated are still found.
- */
+/** mDNS types the home screen browses: only the Nudge type. */
 internal object ServiceTypes {
     const val PRIMARY = "_nudge._tcp."
-    const val LEGACY = "_clipboard-share._tcp."
-    val ALL = listOf(PRIMARY, LEGACY)
+    val ALL = listOf(PRIMARY)
 
     fun isKnown(serviceType: String?): Boolean {
         val type = serviceType?.removeSuffix(".") ?: return false
@@ -49,7 +45,7 @@ internal object ServiceTypes {
 class MainActivity : AppCompatActivity() {
 
     private companion object {
-        const val TAG = "ClipboardShare"
+        const val TAG = "Nudge"
         const val NOTIFICATION_PERMISSION_REQUEST = 1001
         const val SEARCH_WINDOW_MS = 4_000L
     }
@@ -173,10 +169,7 @@ class MainActivity : AppCompatActivity() {
         updateStatus()
     }
 
-    /**
-     * Browses every type in [ServiceTypes.ALL]. Hosts stay keyed by service
-     * name, so a server announcing both types is listed once.
-     */
+    /** Browses every type in [ServiceTypes.ALL]. Hosts stay keyed by service name. */
     private fun startDiscovery() {
         failedDiscoveries = 0
         discoveryListeners = ServiceTypes.ALL.map { type -> startDiscovery(type) }

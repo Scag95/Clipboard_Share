@@ -21,7 +21,7 @@ type pairingClient struct {
 
 func newPairingClient(t *testing.T) (*httptest.Server, *pair.Broker) {
 	t.Helper()
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	return newPairingClientWithBroker(t, pair.NewBroker())
 }
 
@@ -289,7 +289,7 @@ func TestPairUnknownPendingThenApprovedTokenOnceAndCrossIPForbidden(t *testing.T
 
 func TestPairStatusExpiresAtNinetySeconds(t *testing.T) {
 	now := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	b := pair.NewBrokerWithClock(func() time.Time { return now })
 	client := directPairingClient(t, b)
 	resp := client.do(http.MethodPost, "/pair/request", `{"id":"device-1","name":"Pixel 8"}`, "192.0.2.10")

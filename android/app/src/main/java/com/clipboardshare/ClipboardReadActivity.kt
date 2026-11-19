@@ -57,6 +57,6 @@ class ClipboardReadActivity : Activity() {
     }
 
     private companion object {
-        const val TAG = "ClipboardShare"
+        const val TAG = "Nudge"
     }
 }

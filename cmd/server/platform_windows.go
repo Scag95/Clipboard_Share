@@ -49,7 +49,7 @@ func setupLogging() {
 	if stderrUsable() {
 		console = os.Stderr
 	}
-	path := filepath.Join(pair.EffectiveConfigDir(), "nudge.log")
+	path := filepath.Join(pair.ConfigDir(), "nudge.log")
 	file, err := openRotatingLog(path, maxLogBytes)
 	if err != nil {
 		if console == nil {

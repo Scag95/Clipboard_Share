@@ -36,7 +36,7 @@ import kotlin.coroutines.resume
 class RemoteControlActivity : AppCompatActivity() {
 
     private companion object {
-        const val TAG = "ClipboardShareRemote"
+        const val TAG = "NudgeRemote"
         const val TYPED_CARD_VISIBLE_MS = 3_000L
     }
 

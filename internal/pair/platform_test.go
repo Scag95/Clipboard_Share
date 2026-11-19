@@ -27,9 +27,6 @@ func TestWindowsConfigRootIsAppData(t *testing.T) {
 	if got := ConfigDir(); got != dir {
 		t.Fatalf("ConfigDir() = %q, want %q", got, dir)
 	}
-	if got := EffectiveConfigDir(); got != dir {
-		t.Fatalf("EffectiveConfigDir() = %q, want %q", got, dir)
-	}
 	if got, want := StatePath(), filepath.Join(dir, "state.json"); got != want {
 		t.Fatalf("StatePath() = %q, want %q", got, want)
 	}
@@ -51,25 +48,6 @@ func TestWindowsConfigRootFallsBackToHomeAppData(t *testing.T) {
 	}
 }
 
-func TestWindowsIgnoresLegacyConfigDir(t *testing.T) {
-	tempHome(t)
-	appData := t.TempDir()
-	fakePlatform(t, "windows", appData, nil)
-	oldDir := filepath.Join(appData, "clipboard-share")
-	newDir := filepath.Join(appData, "nudge")
-	writeStateDir(t, oldDir, "old")
-
-	if got := EffectiveConfigDir(); got != newDir {
-		t.Fatalf("EffectiveConfigDir() = %q, want %q (no legacy fallback on Windows)", got, newDir)
-	}
-	moved, err := MigrateLegacyConfig()
-	if err != nil || moved {
-		t.Fatalf("MigrateLegacyConfig() = %v, %v; want false, nil on Windows", moved, err)
-	}
-	assertStateDir(t, oldDir, "old")
-	assertMissing(t, newDir)
-}
-
 func TestLinuxConfigRootStaysDotConfig(t *testing.T) {
 	home := tempHome(t)
 	fakePlatform(t, "linux", filepath.Join(t.TempDir(), "xdg"), nil)
@@ -77,18 +55,13 @@ func TestLinuxConfigRootStaysDotConfig(t *testing.T) {
 	if got := ConfigDir(); got != want {
 		t.Fatalf("ConfigDir() = %q, want %q", got, want)
 	}
-	oldDir := filepath.Join(home, ".config", "clipboard-share")
-	writeStateDir(t, oldDir, "old")
-	if got := EffectiveConfigDir(); got != oldDir {
-		t.Fatalf("EffectiveConfigDir() = %q, want legacy %q on Linux", got, oldDir)
-	}
 }
 
 func listenWithFailingChmod(t *testing.T, goos string) (*ControlServer, error, string) {
 	t.Helper()
 	b := newTestBroker(t)
 	path := filepath.Join(t.TempDir(), "ctl.sock")
-	t.Setenv("CLIPBOARD_SHARE_CTL_SOCK", path)
+	t.Setenv("NUDGE_CTL_SOCK", path)
 	prevOS, prevChmod := hostOS, chmodPath
 	hostOS = goos
 	chmodPath = func(string, os.FileMode) error { return errors.New("chmod unsupported") }

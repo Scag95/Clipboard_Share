@@ -18,7 +18,7 @@ import (
 
 func newInputServer(t *testing.T, rate int) (url string, b *pair.Broker, rec *input.Recorder) {
 	t.Helper()
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	b = pair.NewBroker()
 	rec = &input.Recorder{}
 	r := mux.NewRouter()

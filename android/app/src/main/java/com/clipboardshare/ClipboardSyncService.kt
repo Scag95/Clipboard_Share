@@ -49,7 +49,7 @@ import java.util.concurrent.TimeUnit
 class ClipboardSyncService : Service() {
 
     companion object {
-        private const val TAG = "ClipboardShare"
+        private const val TAG = "Nudge"
         private const val CHANNEL_ID = "clipboard_sync"
         private const val NOTIFICATION_ID = 1001
         private const val POLL_MS = 2_000L

@@ -64,8 +64,7 @@ go mod tidy
 go run ./cmd/server   # o el binario, ver "Compilar los binarios"
 ```
 
-El servidor escucha con TLS en `:8765` (configurable con `NUDGE_PORT`;
-también `CLIPBOARD_SHARE_PORT` como respaldo) y se anuncia en la red local
+El servidor escucha con TLS en `:8765` (configurable con `NUDGE_PORT`) y se anuncia en la red local
 como `_nudge._tcp`. No sirve HTTP plano. Al arrancar registra el certificado y
 el código (`verification code: XXXX-XXXX-XXXX`). Para probarlo a mano:
 `curl -k https://127.0.0.1:8765/health`.
@@ -200,7 +199,10 @@ y sobrevive reinicios del servidor y del PC.
 ## Tests
 
 - Go: `go test ./...` (`internal/api`, `internal/clipboard`, `internal/input`,
-  `internal/pair`, `internal/tlscert`).
+  `internal/pair`, `internal/tlscert`). Es seguro de correr: los tests que
+  leen o escriben el portapapeles real del sistema se saltan salvo que
+  definas `NUDGE_CLIPBOARD_TESTS=1` (hacelo solo si no te importa perder lo
+  que tengas copiado).
 - Panel: `panel/bin/test` (Qt Test offscreen: backend contra un servidor
   falso, UI con clics y teclas reales, instancia única, inicio automático con
   un `systemctl` falso y directorios temporales).
