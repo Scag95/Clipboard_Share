@@ -4,6 +4,10 @@
 *.syso
 dist/
 
+# Signing keys (never commit them)
+*.jks
+*.keystore
+
 # Go
 vendor/
 
