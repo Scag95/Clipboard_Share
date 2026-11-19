@@ -11,9 +11,9 @@ Bajá el APK de la
 con `adb install`). Las actualizaciones se instalan encima porque vienen
 firmadas con la misma clave.
 
-**Si tenías la 0.1.0:** esa versión era `com.clipboardshare` con firma debug,
-así que Android la trata como otra app. Desinstalala, instalá la nueva y
-volvé a emparejar el teléfono con la PC.
+**Si tenías la 0.1.0:** esa versión era otra app para Android (otro id y
+firma debug). Desinstalala, instalá la nueva y volvé a emparejar el teléfono
+con la PC.
 
 ## Generar el APK
 

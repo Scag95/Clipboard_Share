@@ -13,8 +13,7 @@ Nudge hace eso entre un teléfono Android y una PC con Linux o Windows que
 estén en la misma WiFi. El celu encuentra la PC solo (mDNS) y todo pasa por la
 red local: no hay cuentas, ni nube, ni cables.
 
-Antes se llamaba Clipboard Share. Si venías usando esa versión, mirá
-[Migración desde clipboard-share](docs/linux.md#migración-desde-clipboard-share).
+Antes se llamaba Clipboard Share.
 
 ## Qué hace
 
@@ -125,7 +124,7 @@ El detalle de qué está hecho y qué falta está en
 ## Documentación
 
 - [Linux](docs/linux.md): paquete, panel, inicio automático, permisos de
-  uinput, puerto, migración.
+  uinput, puerto.
 - [Windows](docs/windows.md): instalación, emparejamiento, firewall,
   desinstalación, log.
 - [Android](docs/android.md): APK, sync en segundo plano y cómo funciona.

@@ -86,8 +86,7 @@ interruptor. Si un cambio falla, la tarjeta muestra el motivo.
 
 El servidor escucha en `:8765` y se anuncia en la red local por mDNS como
 `_nudge._tcp`. Para cambiar el puerto, ejecutá `systemctl --user edit nudge` y
-definí `Environment=NUDGE_PORT=...`. Los nombres viejos `CLIPBOARD_SHARE_*`
-(por ejemplo `CLIPBOARD_SHARE_PORT`) siguen valiendo como respaldo.
+definí `Environment=NUDGE_PORT=...`.
 
 ## Permisos de /dev/uinput
 
@@ -154,27 +153,6 @@ autofirmado que el servidor guarda en `~/.config/nudge/tls.crt` y
 `~/.config/nudge/tls.key`. El teléfono recuerda ese certificado al emparejar.
 Si borrás `tls.key` (o todo `~/.config/nudge`), el servidor genera otro y
 **cada teléfono tiene que emparejarse de nuevo**.
-
-## Migración desde clipboard-share
-
-Nudge antes se llamaba Clipboard Share. El paquete `nudge` reemplaza a
-`clipboard-share` (`replaces`/`conflicts`/`provides`). Antes de actualizar,
-apagá el servicio viejo:
-
-```bash
-systemctl --user disable --now clipboard-share
-```
-
-Al primer arranque, el **servidor** mueve `~/.config/clipboard-share` a
-`~/.config/nudge` (si este último no existe todavía), así los teléfonos
-emparejados siguen funcionando. Un `~/.config/nudge` existente nunca se
-sobrescribe. El CLI y el panel no mueven nada: usan `~/.config/nudge` si
-existe y, si no, el directorio viejo. Si el servidor no puede moverlo, sigue
-trabajando con el directorio viejo y no se pierde ningún emparejamiento.
-
-Durante la transición el servidor anuncia el servicio mDNS nuevo
-(`_nudge._tcp`) y el viejo (`_clipboard-share._tcp`), y la app de Android
-busca los dos.
 
 ## Probar el panel sin el paquete
 

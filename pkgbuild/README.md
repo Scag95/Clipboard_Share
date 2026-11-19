@@ -5,11 +5,8 @@ Builds the Nudge server and CLI (`nudge`) and the desktop panel
 `prepare()` copies the sources from the parent directory into `src/`, so the
 build leaves no artifacts in the repository tree.
 
-For the user guide (panel, pairing, uinput, migration), see
+For the user guide (panel, pairing, uinput), see
 [docs/linux.md](../docs/linux.md).
-
-The package was called `clipboard-share` before; `nudge` replaces, conflicts
-with and provides it, so `pacman -U` swaps one for the other.
 
 ## Build
 
@@ -49,6 +46,8 @@ under **Ajustes**:
 
 Opening the panel always starts the server if it is not running
 (`systemctl --user start nudge.service`), whatever the first switch says.
+The panel keeps its first-run marker in `~/.local/state/nudge-panel/`
+(`$XDG_STATE_HOME`).
 
 By hand, without the panel:
 
@@ -58,21 +57,7 @@ systemctl --user enable --now nudge
 
 The service starts with the graphical session and restarts if it fails.
 Set `NUDGE_PORT` (default `8765`) with `systemctl --user edit nudge` if
-needed; the old `CLIPBOARD_SHARE_*` variable names still work as a fallback.
-
-## Upgrading from clipboard-share
-
-The first start of the server moves `~/.config/clipboard-share` to
-`~/.config/nudge` when only the old directory exists, so paired phones keep
-working. An existing `~/.config/nudge` is never overwritten. The CLI and the
-panel never move it: until the server has moved it they use the old directory
-as it is, and they follow it to `~/.config/nudge` afterwards. The panel keeps
-its first-run marker in `~/.local/state/nudge-panel/` (`$XDG_STATE_HOME`). The old unit is removed by the upgrade, so stop and disable it
-first, before `pacman -U`, to leave no running process or dangling link:
-
-```sh
-systemctl --user disable --now clipboard-share.service
-```
+needed.
 
 ## Remote input (/dev/uinput)
 

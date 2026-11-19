@@ -11,9 +11,6 @@ func TestServiceTypes(t *testing.T) {
 	if ServiceType != "_nudge._tcp" {
 		t.Fatalf("ServiceType = %q, want _nudge._tcp", ServiceType)
 	}
-	if LegacyServiceType != "_clipboard-share._tcp" {
-		t.Fatalf("LegacyServiceType = %q, want _clipboard-share._tcp", LegacyServiceType)
-	}
 }
 
 type fakeRegistry struct {
@@ -35,14 +32,14 @@ func (f *fakeRegistry) install(t *testing.T) {
 	t.Cleanup(func() { register = prev })
 }
 
-func TestAnnounceRegistersBothTypesAndShutsBothDown(t *testing.T) {
+func TestAnnounceRegistersOnlyNudgeAndShutsItDown(t *testing.T) {
 	f := &fakeRegistry{}
 	f.install(t)
 	stop, err := Announce("omarchy", "8765")
 	if err != nil {
 		t.Fatalf("Announce error: %v", err)
 	}
-	want := []string{"omarchy|_nudge._tcp|8765", "omarchy|_clipboard-share._tcp|8765"}
+	want := []string{"omarchy|_nudge._tcp|8765"}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("registrations = %q, want %q", f.calls, want)
 	}
@@ -50,21 +47,8 @@ func TestAnnounceRegistersBothTypesAndShutsBothDown(t *testing.T) {
 		t.Fatalf("shut down early: %q", f.shutdown)
 	}
 	stop()
-	if len(f.shutdown) != 2 {
-		t.Fatalf("shutdown = %q, want both types", f.shutdown)
-	}
-}
-
-func TestAnnounceContinuesWhenLegacyFails(t *testing.T) {
-	f := &fakeRegistry{fail: map[string]error{LegacyServiceType: errors.New("legacy boom")}}
-	f.install(t)
-	stop, err := Announce("omarchy", "8765")
-	if err != nil || stop == nil {
-		t.Fatalf("Announce = (stop set: %v), %v; want primary only", stop != nil, err)
-	}
-	stop()
 	if !reflect.DeepEqual(f.shutdown, []string{ServiceType}) {
-		t.Fatalf("shutdown = %q, want primary only", f.shutdown)
+		t.Fatalf("shutdown = %q, want %q", f.shutdown, ServiceType)
 	}
 }
 
