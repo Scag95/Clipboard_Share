@@ -264,6 +264,11 @@ func (t *winTray) add() {
 	nid.uCallbackMessage = wmTrayCB
 	nid.hIcon = t.icon
 	copyUTF16(nid.szTip[:], trayTooltip)
+	// TaskbarCreated is also broadcast when the taskbar's DPI changes, with
+	// our icon still present; NIM_ADD would then fail as a duplicate. Delete
+	// first (a no-op when the icon is absent) so the add always starts clean.
+	stale := t.baseData()
+	shellNotify(nimDelete, &stale)
 	ok, err := shellNotify(nimAdd, &nid)
 	if !ok {
 		// Explorer may still be starting; TaskbarCreated retries.

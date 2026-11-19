@@ -22,8 +22,9 @@
 # taskbar show and the tray loads with LoadImageW(MAKEINTRESOURCE(1)); a
 # version resource (ProductName "Nudge", FileDescription, CompanyName and
 # LegalCopyright from LICENSE, OriginalFilename, FileVersion/ProductVersion =
-# the version); and an application manifest (asInvoker, per-monitor v2 DPI
-# aware, Common Controls v6). The .syso is generated and linked inside a temp
+# the version); and an application manifest (asInvoker, Common Controls v6,
+# DPI unaware like a manifest-less exe so remote mouse coordinates keep their
+# previous meaning). The .syso is generated and linked inside a temp
 # copy of the Go sources, so no .syso ever appears in cmd/server.
 #
 # Needs: go (1.24), rsvg-convert, magick (ImageMagick 7), zip, sha256sum.
