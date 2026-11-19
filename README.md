@@ -103,9 +103,8 @@ genera otro certificado y cada teléfono tiene que emparejarse de nuevo.
   certificado autofirmado de la PC. Al emparejar, el celu guarda su huella y
   después rechaza cualquier otro certificado; el código de verificación es
   lo que te protege en ese primer contacto.
-- **El clipboard no tiene autenticación**: cualquiera en la misma red puede
-  leerlo y escribirlo. Usalo en redes de confianza (la de tu casa, no la del
-  café).
+- El portapapeles, igual que el mouse y el teclado, solo responde a
+  teléfonos que aprobaste: sin su token, la PC no deja leerlo ni escribirlo.
 - La app de Android no guarda en sus logs lo que copiás, solo el tipo y el
   tamaño.
 

@@ -130,5 +130,3 @@ Límites conocidos
   muestra el estado y los teléfonos emparejados. La aprobación es con la
   ventana Sí/No o con "nudge pair"; para revocar, "nudge pair revoke".
 - Ejecutables sin firmar (SmartScreen).
-- El portapapeles por HTTP no tiene autenticación: cualquiera en la red
-  local puede leerlo y escribirlo. Usalo solo en redes de confianza.

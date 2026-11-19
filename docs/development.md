@@ -178,9 +178,8 @@ y sobrevive reinicios del servidor y del PC.
 
 ## Seguridad
 
-- **El clipboard HTTP no tiene autenticación**: cualquiera en la LAN puede
-  leerlo y escribirlo.
-- El control de input **sí** requiere token.
+- El clipboard (`/clipboard/*`) y el control de input requieren el token del
+  teléfono (`Authorization: Bearer` y `?token=` respectivamente).
 - Todo el tráfico (HTTP y el WebSocket de control remoto) va cifrado con TLS;
   el token y los eventos ya no viajan en claro por la LAN. El primer contacto
   (emparejar) confía en el certificado que ve, por eso hay que comparar el
@@ -224,7 +223,6 @@ y sobrevive reinicios del servidor y del PC.
 
 ### Conocido y sin resolver
 
-- El clipboard HTTP no está autenticado.
 - El sync celu → PC depende del texto de un log del sistema de Android y de un
   diálogo de consentimiento que solo el usuario puede aceptar.
 - La regla udev `uaccess` no está verificada.
