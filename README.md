@@ -130,6 +130,10 @@ El detalle de qué está hecho y qué falta está en
 - [Android](docs/android.md): APK, sync en segundo plano y cómo funciona.
 - [Desarrollo](docs/development.md): arquitectura, compilar, API HTTP,
   protocolo de control remoto, tests.
+- [Preguntas frecuentes](docs/faq.md): el celu no encuentra la PC, uinput,
+  permisos de Android, certificado, versiones, re-emparejar tras la 1.0, log.
+
+Los cambios de cada versión están en el [CHANGELOG](CHANGELOG.md).
 
 ## Licencia
 
