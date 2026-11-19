@@ -33,7 +33,7 @@ Antes se llamaba Clipboard Share. Si venías usando esa versión, mirá
 | Plataforma | Qué hay | Estado |
 |------------|---------|--------|
 | Linux (Arch/Omarchy) | Paquete `nudge`: servidor, CLI y panel con ícono en la bandeja | Probado instalando el paquete; es la versión más completa |
-| Windows 10/11 x64 | Zip con instalador por usuario | Beta: probado en GitHub Actions (`windows-latest`), todavía no en una PC física |
+| Windows 10/11 x64 | Zip con instalador por usuario e ícono en la bandeja | Beta: probado en GitHub Actions (`windows-latest`), todavía no en una PC física |
 | Android | APK con firma debug | Beta personal, sin Play Store |
 
 Los tres están en la [release 0.1.0](https://github.com/Scag95/Nudge/releases/tag/v0.1.0)
@@ -69,8 +69,8 @@ clipboard con la app cerrada hacen falta dos comandos de `adb`, explicados en
 
 1. En el celu abrís Nudge y elegís tu PC de la lista.
 2. En la PC aparece la solicitud con el nombre del teléfono: en Linux, un
-   aviso en la bandeja que abre el panel; en Windows, una ventana Sí/No (con
-   No por defecto).
+   aviso en la bandeja que abre el panel; en Windows, una notificación en la
+   bandeja y una ventana Sí/No (con No por defecto).
 3. La aprobás. La solicitud caduca a los 90 s si no hacés nada.
 4. De ahí en más el celu se reconecta solo, incluso después de reiniciar la
    PC. Si perdés el teléfono, lo revocás desde el panel o con

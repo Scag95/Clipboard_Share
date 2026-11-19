@@ -117,8 +117,9 @@ Datos y log
 Límites conocidos
 -----------------
 - Probado solo en GitHub Actions (windows-latest), no en una PC física.
-- No hay panel ni ícono en la bandeja en Windows todavía: la aprobación es
-  con la ventana Sí/No o con "nudge pair".
+- No hay panel como en Linux: el ícono de la bandeja (clic derecho) solo
+  muestra el estado y los teléfonos emparejados. La aprobación es con la
+  ventana Sí/No o con "nudge pair"; para revocar, "nudge pair revoke".
 - Ejecutables sin firmar (SmartScreen).
 - El portapapeles por HTTP no tiene autenticación: cualquiera en la red
   local puede leerlo y escribirlo. Usalo solo en redes de confianza.

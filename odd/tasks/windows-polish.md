@@ -10,11 +10,12 @@ Three improvements found while looking at the Windows build under Wine. Branch: 
 - S6: If the tray cannot be created (no shell, Explorer restarting), the server keeps running and logs it; the icon is re-added when Explorer restarts (TaskbarCreated message). Linux behavior unchanged. `go build ./... && go vet ./... && go test ./...` pass on Linux, `GOOS=windows go vet ./...` passes, and the platform-independent parts (menu model, notification text) have tests runnable on Linux.
 
 ## Tasks
-- [ ] T1 (S2) route: worker W-icon — scripts/build-windows.sh, packaging/windows/winres/**, .github/workflows/windows.yml (only if the package job needs it). Commit: pending.
-- [ ] T2 (S3) route: inline — cmd/server/approval.go and its test. Commit: pending.
-- [ ] T3 (S4-S6) route: worker W-tray — cmd/server/** except approval text. Commit: pending.
+- [x] T1 (S2) route: worker W-icon — scripts/build-windows.sh, packaging/windows/winres/**, .github/workflows/windows.yml (only if the package job needs it). Commit: 6a56d9f.
+- [x] T2 (S3) route: inline — cmd/server/approval.go and its test. Commit: 57957ed.
+- [x] T3 (S4-S6) route: worker W-tray — cmd/server/** except approval text. Commit: 9fce3e9.
 - [ ] T4 docs + verification: docs/windows.md, README.md, packaging/windows/README-windows.txt; Wine run of the tray and the zip; CI run. Commit: pending.
 
 ## Log
 - L1: haz las 3 mejeroas que propusiste.
 - L2 (decisions): menu "Estado y teléfonos emparejados"; requests "Notificación + diálogo (recomendado)"; implementation "Win32 a mano (recomendado)"; base "Subir feat/windows-build y rama nueva encima" (pushed 1096f11). Tone: voseo, matching the installer ("Presioná Enter") and the README.
+- L3 (evidence, Wine 11.20 virtual desktop, zip built from 9fce3e9): "tray icon added" logged; Wine's systray window shows the embedded Nudge icon (resource ID 1, so T1 and T3 fit); right-click menu (WM_CONTEXTMENU posted to NudgeTrayWindow) shows "Escuchando en el puerto 18765", a separator and "Ningún teléfono emparejado", and after approving from the dialog "Galaxy S22 de Scag — ::1"; the dialog shows "Si no reconocés este dispositivo, elegí No.". The balloon notification is not drawn by Wine's standalone systray window; NIM_MODIFY reported no error. go-winres extract shows icon group #1 (7 sizes), version strings and the asInvoker manifest in both exes; go.mod/go.sum unchanged.

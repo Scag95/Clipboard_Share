@@ -38,10 +38,21 @@ antes el SHA256 (`certutil -hashfile <zip> SHA256`).
 
 ## Emparejar
 
-No hay panel en Windows. Cuando un teléfono pide emparejarse aparece una
-ventana **Sí/No** con su nombre e IP, con **No** como botón por defecto (un
-Enter sin querer rechaza). El CLI también sirve, desde una terminal nueva:
-`nudge pair list` y `nudge pair --last`.
+Cuando un teléfono pide emparejarse, el ícono de la bandeja muestra una
+notificación ("Solicitud de emparejamiento") y aparece una ventana **Sí/No**
+con su nombre e IP, con **No** como botón por defecto (un Enter sin querer
+rechaza). La ventana es el único lugar donde se aprueba. El CLI también
+sirve, desde una terminal nueva: `nudge pair list` y `nudge pair --last`.
+
+## Ícono en la bandeja
+
+Mientras el servidor corre, Nudge tiene un ícono en el área de notificación.
+Con clic derecho muestra el estado ("Escuchando en el puerto 8765") y los
+teléfonos emparejados con su IP ("Ningún teléfono emparejado" si no hay).
+Es solo informativo: para revocar un teléfono usá
+`nudge pair revoke --device <id>` (el id sale en `nudge pair list`). Si
+Windows esconde el ícono, está en la flechita "Mostrar iconos ocultos". Si
+el explorador se reinicia, el ícono vuelve solo.
 
 ## Inicio automático
 
@@ -71,7 +82,8 @@ El servidor en segundo plano escribe su log en `%APPDATA%\nudge\nudge.log`.
 ## Límites
 
 - Probado solo en GitHub Actions (`windows-latest`), no en una PC física.
-- Sin panel ni ícono en la bandeja en Windows todavía.
+- No hay panel como en Linux: el ícono de la bandeja solo informa; aprobar es
+  con la ventana Sí/No y revocar con `nudge pair revoke`.
 - Ejecutables sin firmar (SmartScreen).
 
 ## Recompilar el zip
