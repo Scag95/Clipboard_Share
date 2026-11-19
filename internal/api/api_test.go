@@ -47,7 +47,7 @@ func newTestServer(t *testing.T) (*testServer, *fakeStore) {
 	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	b := pair.NewBroker()
 	store := &fakeStore{}
-	srv := httptest.NewServer(NewRouter(store, b))
+	srv := httptest.NewServer(NewRouter(store, b, "1.0.0"))
 	t.Cleanup(srv.Close)
 	ts := &testServer{Server: srv, store: store, broker: b, token: inputToken(t, b)}
 	return ts, store
@@ -183,6 +183,7 @@ func TestClipboardAcceptsCaseInsensitiveScheme(t *testing.T) {
 	}
 }
 
+// S2: /health is public and reports the protocol and the server version.
 func TestHealth(t *testing.T) {
 	srv, _ := newTestServer(t)
 	resp, err := http.Get(srv.URL + "/health")
@@ -193,12 +194,15 @@ func TestHealth(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	var body map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if body["status"] != "ok" {
-		t.Fatalf("body = %v, want status ok", body)
+	if want := `{"status":"ok","protocol":1,"version":"1.0.0"}` + "\n"; string(raw) != want {
+		t.Fatalf("body = %q, want %q", raw, want)
 	}
 }
 

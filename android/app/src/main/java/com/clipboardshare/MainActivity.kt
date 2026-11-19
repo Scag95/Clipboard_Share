@@ -26,9 +26,6 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.util.concurrent.TimeUnit
 
 /** mDNS types the home screen browses: only the Nudge type. */
 internal object ServiceTypes {
@@ -65,6 +62,9 @@ class MainActivity : AppCompatActivity() {
     private var discoveryError = false
     private var liveCount = 0
 
+    /** Protocol mismatch of the last probed PC (#12); shown until the next scan. */
+    private var protocolMessage: String? = null
+
     /** Services are aggregated by name; resolving one never replaces another. */
     private val discoveredServices = linkedMapOf<String, NsdServiceInfo>()
     private val resolvingServices = mutableSetOf<String>()
@@ -74,15 +74,7 @@ class MainActivity : AppCompatActivity() {
      * Reachability only: /health over TLS without a pin (any certificate is accepted)
      * and never with a token, so nothing secret is sent to an unverified PC (S6).
      */
-    private val probeClient = PinnedTls.client(
-        OkHttpClient.Builder()
-            .connectTimeout(1_500, TimeUnit.MILLISECONDS)
-            .readTimeout(1_500, TimeUnit.MILLISECONDS)
-            .writeTimeout(1_500, TimeUnit.MILLISECONDS)
-            .callTimeout(1_500, TimeUnit.MILLISECONDS)
-            .build(),
-        pin = null,
-    ).http
+    private val probeClient = PinnedTls.client(HealthCheck.baseClient, pin = null).http
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,6 +96,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Restarts NSD discovery from scratch; remembered hosts stay in the list. */
     private fun rescan() {
+        protocolMessage = null
         stopDiscovery()
         discoveredServices.clear()
         resolvingServices.clear()
@@ -127,6 +120,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateStatus() {
         statusText.text = when {
+            protocolMessage != null -> protocolMessage
             discoveryError -> "No se pudo buscar dispositivos en la red"
             searching -> "Buscando dispositivos en tu red…"
             liveCount == 0 -> "Ningún dispositivo en red"
@@ -351,25 +345,25 @@ class MainActivity : AppCompatActivity() {
         val key = SessionStore.hostKey(host.host, host.port)
         if (!probingHosts.add(key)) return
         lifecycleScope.launch {
-            val reachable = withContext(Dispatchers.IO) {
-                try {
-                    val request = Request.Builder().url("${serverUrl(host)}/health").get().build()
-                    probeClient.newCall(request).execute().use { it.isSuccessful }
-                } catch (e: Exception) {
-                    Log.d(TAG, "Health probe failed for $key: ${e.message}")
-                    false
-                }
-            }
+            val probe = withContext(Dispatchers.IO) { HealthCheck.probe(probeClient, serverUrl(host)) }
             probingHosts.remove(key)
-            if (reachable) {
-                openRemote(host)
-            } else {
+            if (probe == ProtocolCompat.HealthProbe.Unreachable) {
+                Log.d(TAG, "Health probe failed for $key")
                 Toast.makeText(
                     this@MainActivity,
                     "${host.name} no responde. Verifica que esté encendido y vuelve a intentar.",
                     Toast.LENGTH_LONG,
                 ).show()
+                return@launch
             }
+            val incompatible = ProtocolCompat.blockingMessage(probe)
+            if (incompatible != null) {
+                // Neither pair nor sync with a PC that speaks another protocol (#12).
+                protocolMessage = incompatible
+                updateStatus()
+                return@launch
+            }
+            openRemote(host)
         }
     }
 

@@ -15,6 +15,7 @@ func TestServiceTypes(t *testing.T) {
 
 type fakeRegistry struct {
 	calls    []string
+	txt      [][]string
 	fail     map[string]error
 	shutdown []string
 }
@@ -22,7 +23,8 @@ type fakeRegistry struct {
 func (f *fakeRegistry) install(t *testing.T) {
 	t.Helper()
 	prev := register
-	register = func(name, service string, port int) (func(), error) {
+	register = func(name, service string, port int, txt []string) (func(), error) {
+		f.txt = append(f.txt, txt)
 		f.calls = append(f.calls, name+"|"+service+"|"+strconv.Itoa(port))
 		if err := f.fail[service]; err != nil {
 			return nil, err
@@ -42,6 +44,10 @@ func TestAnnounceRegistersOnlyNudgeAndShutsItDown(t *testing.T) {
 	want := []string{"omarchy|_nudge._tcp|8765"}
 	if !reflect.DeepEqual(f.calls, want) {
 		t.Fatalf("registrations = %q, want %q", f.calls, want)
+	}
+	// S2: the TXT record carries the protocol version (replacing version=1).
+	if wantTXT := [][]string{{"protocol=1"}}; !reflect.DeepEqual(f.txt, wantTXT) {
+		t.Fatalf("TXT records = %q, want %q", f.txt, wantTXT)
 	}
 	if len(f.shutdown) != 0 {
 		t.Fatalf("shut down early: %q", f.shutdown)

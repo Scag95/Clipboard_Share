@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -285,6 +286,83 @@ func TestPairUnknownPendingThenApprovedTokenOnceAndCrossIPForbidden(t *testing.T
 	if statusResp.StatusCode != http.StatusOK || status.State != pair.StateApproved || status.Token != "" {
 		t.Fatalf("second approved status = %+v, HTTP %d; token must be omitted", status, statusResp.StatusCode)
 	}
+}
+
+// decodeJSONMap decodes a whole response body into a generic map so tests can
+// assert the exact set of JSON fields.
+func decodeJSONMap(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func assertJSONFields(t *testing.T, what string, got, want map[string]any) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s body = %v, want %v", what, got, want)
+	}
+}
+
+// S2: every /pair/request (200 and 202) and /pair/status body carries
+// "protocol":1 next to its existing fields.
+func TestPairBodiesCarryProtocol(t *testing.T) {
+	now := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	b := pair.NewBrokerWithClock(func() time.Time { return now })
+	client := directPairingClient(t, b)
+	const ip = "192.0.2.10"
+
+	resp := client.do(http.MethodPost, "/pair/request", `{"id":"device-1","name":"Pixel 8"}`, ip)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("request HTTP status = %d, want 202", resp.StatusCode)
+	}
+	pending := decodeJSONMap(t, resp)
+	requestID, _ := pending["requestId"].(string)
+	if requestID == "" {
+		t.Fatalf("202 body = %v, want a requestId", pending)
+	}
+	assertJSONFields(t, "202 /pair/request", pending, map[string]any{"requestId": requestID, "protocol": float64(1)})
+
+	resp = client.do(http.MethodGet, "/pair/status?id="+requestID, "", ip)
+	assertJSONFields(t, "pending /pair/status", decodeJSONMap(t, resp), map[string]any{"state": "pending", "protocol": float64(1)})
+
+	if err := b.Approve(requestID); err != nil {
+		t.Fatal(err)
+	}
+	resp = client.do(http.MethodGet, "/pair/status?id="+requestID, "", ip)
+	approved := decodeJSONMap(t, resp)
+	token, _ := approved["token"].(string)
+	if token == "" {
+		t.Fatalf("approved body = %v, want a token", approved)
+	}
+	assertJSONFields(t, "approved /pair/status", approved, map[string]any{"state": "approved", "token": token, "protocol": float64(1)})
+
+	req := httptest.NewRequest(http.MethodPost, "/pair/request", strings.NewReader(`{"id":"device-1","name":"Pixel 8"}`))
+	req.RemoteAddr = ip + ":12345"
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	client.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("known request HTTP status = %d, want 200", rec.Code)
+	}
+	known := decodeJSONMap(t, rec.Result())
+	rotated, _ := known["token"].(string)
+	if rotated == "" || rotated == token {
+		t.Fatalf("200 body = %v, want a rotated token", known)
+	}
+	assertJSONFields(t, "200 /pair/request", known, map[string]any{"token": rotated, "protocol": float64(1)})
+
+	resp = client.do(http.MethodPost, "/pair/request", `{"id":"device-2","name":"Tablet"}`, ip)
+	second, _ := decodeJSONMap(t, resp)["requestId"].(string)
+	now = now.Add(pair.PendingTTL)
+	resp = client.do(http.MethodGet, "/pair/status?id="+second, "", ip)
+	if resp.StatusCode != http.StatusGone {
+		t.Fatalf("expired HTTP status = %d, want 410", resp.StatusCode)
+	}
+	assertJSONFields(t, "expired /pair/status", decodeJSONMap(t, resp), map[string]any{"state": "expired", "protocol": float64(1)})
 }
 
 func TestPairStatusExpiresAtNinetySeconds(t *testing.T) {

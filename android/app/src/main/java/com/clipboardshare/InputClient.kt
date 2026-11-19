@@ -145,6 +145,9 @@ object PairingClient {
         object TooManyRequests : RequestResult()
         object PinMismatch : RequestResult()
         object Failed : RequestResult()
+
+        /** The PC answered with another `protocol` (null: none); nothing may be stored (#12). */
+        data class Incompatible(val serverProtocol: Int?) : RequestResult()
     }
 
     sealed class StatusResult {
@@ -185,13 +188,21 @@ object PairingClient {
             pinned.http.newCall(request).execute().use { resp ->
                 val seen = seenFingerprint(resp, pinned) ?: return@use RequestResult.Failed
                 when (resp.code) {
-                    200 -> {
-                        val token = JSONObject(resp.body?.string() ?: "").optString("token")
-                        if (token.isNotEmpty()) RequestResult.Approved(token, seen) else RequestResult.Failed
-                    }
-                    202 -> {
-                        val id = JSONObject(resp.body?.string() ?: "").optString("requestId")
-                        if (id.isNotEmpty()) RequestResult.Pending(id, seen) else RequestResult.Failed
+                    200, 202 -> {
+                        val json = JSONObject(resp.body?.string() ?: "")
+                        // Checked before the token or request id is used: an incompatible PC
+                        // is never paired with (#12).
+                        val protocol = ProtocolCompat.protocolOf(json.opt("protocol"))
+                        if (ProtocolCompat.check(protocol) != ProtocolCompat.Result.COMPATIBLE) {
+                            return@use RequestResult.Incompatible(protocol)
+                        }
+                        if (resp.code == 200) {
+                            val token = json.optString("token")
+                            if (token.isNotEmpty()) RequestResult.Approved(token, seen) else RequestResult.Failed
+                        } else {
+                            val id = json.optString("requestId")
+                            if (id.isNotEmpty()) RequestResult.Pending(id, seen) else RequestResult.Failed
+                        }
                     }
                     429 -> RequestResult.TooManyRequests
                     else -> RequestResult.Failed

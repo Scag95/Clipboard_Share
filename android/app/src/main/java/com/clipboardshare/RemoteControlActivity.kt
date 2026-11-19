@@ -49,6 +49,9 @@ class RemoteControlActivity : AppCompatActivity() {
     @Volatile private var manualDisconnect = false
     private var pairingJob: Job? = null
 
+    /** The /health protocol probe that runs before the WebSocket opens (#12). */
+    private var connectJob: Job? = null
+
     private lateinit var statusText: TextView
     private lateinit var clipboardStatusText: TextView
     private lateinit var keyboard: RemoteKeyboardView
@@ -199,6 +202,8 @@ class RemoteControlActivity : AppCompatActivity() {
             manualDisconnect = true
             pairingJob?.cancel()
             pairingJob = null
+            connectJob?.cancel()
+            connectJob = null
             handler.removeCallbacksAndMessages(null)
             retryScheduled = false
             client.disconnect()
@@ -213,7 +218,9 @@ class RemoteControlActivity : AppCompatActivity() {
         super.onResume()
         clipboardStatusHandler.removeCallbacks(clipboardStatusPoller)
         clipboardStatusHandler.post(clipboardStatusPoller)
-        if (!::store.isInitialized || client.connected || pairingJob?.isActive == true) return
+        if (!::store.isInitialized || client.connected || pairingJob?.isActive == true ||
+            connectJob?.isActive == true
+        ) return
         manualDisconnect = false
         if (store.getToken(hostKey) != null) {
             connect()
@@ -326,10 +333,25 @@ class RemoteControlActivity : AppCompatActivity() {
             showConnect("Dispositivo: ${store.deviceName}. Toca Conectar para solicitar acceso")
             return
         }
-        if (client.connected) return
+        if (client.connected || connectJob?.isActive == true) return
         hidePairingControls()
         setStatus("Conectando ${store.deviceName}…")
-        client.connect(serverUrl, token, pin, wsListener)
+        // Check the PC's protocol first, over the pinned certificate and without the token;
+        // an unreachable PC (or another certificate) goes on as before and the socket reports it.
+        connectJob = lifecycleScope.launch {
+            val probe = withContext(Dispatchers.IO) {
+                HealthCheck.probe(PinnedTls.client(HealthCheck.baseClient, pin).http, serverUrl)
+            }
+            val incompatible = ProtocolCompat.blockingMessage(probe)
+            if (incompatible != null) {
+                // Neither connect nor renew: the PC speaks another protocol. The token stays.
+                authRetryInFlight = false
+                showConnect(incompatible)
+                return@launch
+            }
+            if (manualDisconnect || client.connected) return@launch
+            client.connect(serverUrl, token, pin, wsListener)
+        }
     }
 
     private fun scheduleRetry() {
@@ -348,6 +370,8 @@ class RemoteControlActivity : AppCompatActivity() {
     private fun requestPairing(automatic: Boolean) {
         manualDisconnect = false
         pairingJob?.cancel()
+        connectJob?.cancel()
+        connectJob = null
         handler.removeCallbacksAndMessages(null)
         retryScheduled = false
         hidePairingControls()
@@ -394,6 +418,11 @@ class RemoteControlActivity : AppCompatActivity() {
                 PairingClient.RequestResult.PinMismatch -> onPinMismatch()
                 PairingClient.RequestResult.TooManyRequests -> showConnect(
                     "Hay demasiadas solicitudes pendientes. Espera y vuelve a intentar"
+                )
+                // Neither pair nor connect: the PC speaks another protocol (#12).
+                is PairingClient.RequestResult.Incompatible -> showConnect(
+                    ProtocolCompat.message(result.serverProtocol)
+                        ?: "No se pudo solicitar acceso. Verifica el servidor y reintenta"
                 )
                 PairingClient.RequestResult.Failed -> showConnect(
                     if (automatic) "No se pudo renovar la sesión. Toca Conectar para reintentar"

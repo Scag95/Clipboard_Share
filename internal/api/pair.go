@@ -30,7 +30,7 @@ type pairRequest struct {
 // request (new device, or known device without its valid token) gets 202 with
 // a requestId and waits for approval on the PC; 429 when a source IP has too
 // many pending requests. GET /pair/status?id=... is source-IP bound and returns approval
-// tokens only once.
+// tokens only once. Every JSON body also carries "protocol": ProtocolVersion.
 func AttachPairing(r *mux.Router, p Pairer) {
 	h := &pairHandlers{pairer: p}
 	r.HandleFunc("/pair/request", h.request).Methods("POST")
@@ -70,7 +70,19 @@ func (h *pairHandlers) request(w http.ResponseWriter, r *http.Request) {
 	if result.Token != "" {
 		status = http.StatusOK
 	}
-	writePairJSON(w, status, result)
+	writePairJSON(w, status, pairRequestBody{RequestResult: result, Protocol: ProtocolVersion})
+}
+
+// pairRequestBody and pairStatusBody add the protocol version to the broker
+// results without changing their own fields.
+type pairRequestBody struct {
+	pair.RequestResult
+	Protocol int `json:"protocol"`
+}
+
+type pairStatusBody struct {
+	pair.StatusResult
+	Protocol int `json:"protocol"`
 }
 
 func (h *pairHandlers) status(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +94,7 @@ func (h *pairHandlers) status(w http.ResponseWriter, r *http.Request) {
 	result, err := h.pairer.Status(requestID, remoteIP(r))
 	switch {
 	case errors.Is(err, pair.ErrExpired):
-		writePairJSON(w, http.StatusGone, result)
+		writePairJSON(w, http.StatusGone, pairStatusBody{StatusResult: result, Protocol: ProtocolVersion})
 	case errors.Is(err, pair.ErrForbidden):
 		http.Error(w, "pair request belongs to a different IP", http.StatusForbidden)
 	case errors.Is(err, pair.ErrNotFound):
@@ -90,7 +102,7 @@ func (h *pairHandlers) status(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		http.Error(w, "could not read pair request", http.StatusInternalServerError)
 	default:
-		writePairJSON(w, http.StatusOK, result)
+		writePairJSON(w, http.StatusOK, pairStatusBody{StatusResult: result, Protocol: ProtocolVersion})
 	}
 }
 
