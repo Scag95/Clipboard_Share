@@ -99,7 +99,9 @@ Sin header, con otro esquema, con un token desconocido o revocado responden
 escribir el clipboard. El WebSocket `/ws/input` sigue recibiendo el mismo
 token como `?token=`.
 
-- `GET  /health`: estado del servidor.
+- `GET  /health`: estado del servidor,
+  `{"status":"ok","protocol":1,"version":"1.0.0"}`: `protocol` es la versión
+  del protocolo de la API y `version` la del servidor.
 - `GET  /clipboard/text`: texto actual del clipboard (`{"text":""}` si no hay
   texto).
 - `POST /clipboard/text`: escribe texto al clipboard (`{"text":"..."}`).
@@ -117,11 +119,40 @@ token como `?token=`.
   el token válido de otro dispositivo). Mientras tanto el token anterior
   sigue valiendo; al aprobar se actualiza la misma entrada (mismo id, token
   nuevo, nombre e IP al día), sin duplicarla. El request caduca a los 90 s.
-  Más de 5 requests pendientes de la misma IP → `429`.
+  Más de 5 requests pendientes de la misma IP → `429`. Los bodies `200` y
+  `202` incluyen además `"protocol":1`.
 - `GET  /pair/status?id=<requestId>`: `pending`; al aprobar, `200
   {"state":"approved","token":"..."}` **una sola vez**; si se denegó, `200
-  denied`; si venció, `410 expired`.
+  denied`; si venció, `410 expired`. Todos estos bodies incluyen además
+  `"protocol":1`.
 - `GET  /ws/input?token=<token>`: WebSocket de control remoto (ver abajo).
+
+### Versión del protocolo
+
+El servidor declara la versión del protocolo en una sola constante
+(`api.ProtocolVersion` en `internal/api`, hoy `1`) y la versión del servidor
+en otra (`Version` en `cmd/server/version.go`, hoy `"1.0.0"`; de ahí la toma
+`scripts/build-windows.sh` para el nombre del zip). `protocol` viaja en
+`/health`, en las respuestas de `/pair/request` y `/pair/status`, y en el
+registro TXT del anuncio mDNS (`protocol=1`, que reemplaza a `version=1`).
+
+La app tiene su propia constante (`ProtocolCompat.APP_PROTOCOL`, `1`) y lee
+`protocol` con un `GET /health` (sin token, con el cliente del pin o sin pin
+si todavía no hay) antes de: abrir un PC recordado desde la lista, abrir el
+WebSocket de control remoto (también para un PC visto por mDNS), y arrancar
+la sincronización del portapapeles (de nuevo tras un poll fallido, por si el
+PC se reinició con otra versión); el pedido de emparejamiento lo lee de su
+propia respuesta. Si `protocol` falta o es otro número no empareja, no
+conecta ni sincroniza (el token y el pin se conservan) y muestra "La PC usa
+otra versión de Nudge (protocolo X; esta app usa Y). Actualizá la app o el servidor para que coincidan.", seguido de
+"Actualizá Nudge en la PC." si el servidor es más viejo (o no manda
+`protocol`) o "Actualizá la app." si es más nuevo, en la línea de estado de
+la pantalla y como estado del portapapeles. Si el sondeo falla por red o
+certificado, todo sigue como antes (el error lo informa la conexión misma).
+
+Regla: el protocolo se sube solo con cambios incompatibles de la API (rutas,
+campos o semántica que un cliente viejo no entiende), y en el servidor y la
+app a la vez. Agregar campos opcionales o cambiar `version` no lo sube.
 
 ## Protocolo de control remoto
 

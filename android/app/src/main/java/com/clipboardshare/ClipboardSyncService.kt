@@ -397,13 +397,44 @@ class ClipboardSyncService : Service() {
 
     private fun startSyncLoop() {
         syncJob = serviceScope.launch {
+            var firstPoll = true
+            var lastPollReachedServer = true
             while (isActive) {
                 // READ_LOGS can be granted while the service runs: start the watcher then.
                 startLogWatcher()
-                syncMutex.withLock { recordPollResult(runSync()) }
+                syncMutex.withLock {
+                    if (ProtocolCompat.probeBeforePoll(firstPoll, lastPollReachedServer)) {
+                        firstPoll = false
+                        checkProtocol()
+                    }
+                    if (syncHalted) return@withLock
+                    val reached = runSync()
+                    lastPollReachedServer = reached
+                    recordPollResult(reached)
+                }
                 delay(POLL_MS)
             }
         }
+    }
+
+    /**
+     * One /health over the pinned client, without the token (#12). A PC with another (or no)
+     * protocol stops the sync and its message stays as the clipboard status; the token and
+     * pin are kept. An unreachable PC or a certificate problem is left to runSync, as before.
+     * Runs under syncMutex.
+     */
+    private fun checkProtocol() {
+        val host = hostKey
+        val url = serverUrl
+        if (syncHalted || url.isEmpty()) return
+        val pin = store.getPin(host) ?: return
+        val probe = HealthCheck.probe(PinnedTls.client(HealthCheck.baseClient, pin).http, url)
+        val message = ProtocolCompat.blockingMessage(probe) ?: return
+        Log.w(TAG, "Clipboard sync stopped: $host speaks another protocol ($probe)")
+        rejectedStatus = message
+        rejectedHost = host
+        // No token is passed, so nothing is cleared; the status shows rejectedStatus.
+        haltSync(host, rejectedToken = null)
     }
 
     /** Only polling outcomes control the three-failure notification threshold. */

@@ -33,6 +33,15 @@ func main() {
 	runServer()
 }
 
+// newRouter wires the clipboard, pairing and remote-input routes; /health
+// reports api.ProtocolVersion and Version.
+func newRouter(pairer *pair.Broker, injector input.Injector) http.Handler {
+	r := api.NewRouter(clipboardStore{}, pairer, Version)
+	api.AttachPairing(r, pairer)
+	api.AttachInputWS(r, pairer, injector, api.DefaultInputRate)
+	return r
+}
+
 // instanceName returns the hostname to announce over mDNS so clients show
 // the real machine name ("omarchy", "livingroom-pc"), falling back to
 // "nudge" when the hostname is unusable.
@@ -124,9 +133,7 @@ func runServer() {
 	// that calls the broker directly, so it works without the socket.
 	pairer.OnRequest(withTrayNotice(tray, pairRequestHandler(pairer, log.Printf)))
 
-	r := api.NewRouter(clipboardStore{}, pairer)
-	api.AttachPairing(r, pairer)
-	api.AttachInputWS(r, pairer, input.New(), api.DefaultInputRate)
+	r := newRouter(pairer, input.New())
 	addr := ":" + port
 	srv := &http.Server{Addr: addr, Handler: r, TLSConfig: serverTLSConfig(cert)}
 
