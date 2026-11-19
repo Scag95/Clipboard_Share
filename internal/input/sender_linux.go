@@ -194,9 +194,11 @@ type linuxInputID struct {
 	Version uint16
 }
 
+// uinputSetup mirrors struct uinput_setup from linux/uinput.h; the field
+// order is the kernel's (id, name, ff_effects_max) and must not change.
 type uinputSetup struct {
-	Name         [80]byte
 	ID           linuxInputID
+	Name         [80]byte
 	FFEffectsMax uint32
 }
 

@@ -116,9 +116,14 @@ func runServer() {
 		}()
 	}
 
+	// Windows only: a notification-area icon (status and paired phones) that
+	// also announces new requests; a no-op elsewhere. Failure keeps serving.
+	tray := startTray(port, pairer, log.Printf)
+	defer tray.Close()
+
 	// Linux: best-effort notify-send. Windows: an in-process Yes/No dialog
 	// that calls the broker directly, so it works without the socket.
-	pairer.OnRequest(pairRequestHandler(pairer, log.Printf))
+	pairer.OnRequest(withTrayNotice(tray, pairRequestHandler(pairer, log.Printf)))
 
 	r := api.NewRouter(clipboardStore{})
 	api.AttachPairing(r, pairer)

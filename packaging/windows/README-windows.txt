@@ -1,8 +1,11 @@
 Nudge para Windows 10/11 (x64)
 ==============================
 
-AVISO: esta versión se compiló desde Linux (cross-compile) y todavía NO se
-probó en Windows. Si algo falla, mirá el log (ver abajo) y avisá.
+AVISO: esta versión se compiló desde Linux (cross-compile). Se prueba en
+GitHub Actions (windows-latest), pero todavía NO se probó en una PC física
+con Windows. Si algo falla, mirá el log (ver abajo) y avisá.
+
+Más documentación: https://github.com/Scag95/Nudge/blob/main/docs/windows.md
 
 Nudge comparte el portapapeles (texto e imágenes) entre esta PC y un teléfono
 Android en la misma red WiFi, y deja que el teléfono maneje el mouse y el
@@ -113,9 +116,10 @@ Datos y log
 
 Límites conocidos
 -----------------
-- Sin probar en Windows (compilado desde Linux).
-- No hay panel ni ícono en la bandeja en Windows todavía: la aprobación es
-  con la ventana Sí/No o con "nudge pair".
+- Probado solo en GitHub Actions (windows-latest), no en una PC física.
+- No hay panel como en Linux: el ícono de la bandeja (clic derecho) solo
+  muestra el estado y los teléfonos emparejados. La aprobación es con la
+  ventana Sí/No o con "nudge pair"; para revocar, "nudge pair revoke".
 - Ejecutables sin firmar (SmartScreen).
 - El portapapeles por HTTP no tiene autenticación: cualquiera en la red
   local puede leerlo y escribirlo. Usalo solo en redes de confianza.
