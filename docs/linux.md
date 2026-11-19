@@ -120,12 +120,15 @@ el acceso venía del grupo `input`.
 4. Listo. Las reconexiones siguientes son automáticas, también después de
    reiniciar el servidor o el PC.
 
-Si el PC ya conocía el teléfono (por ejemplo, al actualizar desde una
-versión sin cifrado o después del aviso "El certificado de la PC cambió"),
-le da acceso sin pedir aprobación. Entonces es el teléfono el que pregunta
-"¿La PC muestra el código …?": miralo en el panel o con `nudge pair list`
-y tocá **Sí, coincide** solo si es el mismo. Con **No** el teléfono no
-guarda nada y cancela el emparejamiento.
+Un teléfono que el PC ya conocía solo se reconecta sin aprobación si
+presenta su token vigente por la conexión cifrada; si no lo tiene (por
+ejemplo, después del aviso "El certificado de la PC cambió"), la solicitud
+vuelve a aparecer en el panel con el código, como la de un teléfono nuevo.
+Si un PC con una versión anterior de Nudge igual le da acceso sin pedir
+aprobación, es el teléfono el que pregunta "¿La PC muestra el código …?":
+miralo en el panel o con `nudge pair list` y tocá **Sí, coincide** solo si
+es el mismo. Con **No** el teléfono no guarda nada y cancela el
+emparejamiento.
 
 El CLI sirve para lo mismo y es cómodo para scripts:
 

@@ -31,7 +31,7 @@ func newInputServer(t *testing.T, rate int) (url string, b *pair.Broker, rec *in
 
 func inputToken(t *testing.T, b *pair.Broker) string {
 	t.Helper()
-	req, err := b.Request("input-device", "Test Phone", "127.0.0.1")
+	req, err := b.Request("input-device", "Test Phone", "127.0.0.1", "")
 	if err != nil {
 		t.Fatal(err)
 	}

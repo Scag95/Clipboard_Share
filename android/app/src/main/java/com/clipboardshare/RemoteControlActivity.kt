@@ -356,16 +356,19 @@ class RemoteControlActivity : AppCompatActivity() {
             else "Solicitando acceso para ${store.deviceName}…"
         )
         // A paired PC is only reached through its pin; a new pairing trusts the certificate
-        // it is shown and binds the approval polls to it (S6).
+        // it is shown and binds the approval polls to it (S6). The current token goes along
+        // only with the pin, so the PC renews it without approval (#21).
         val pin = store.getPin(hostKey)
+        val token = store.getToken(hostKey)
         pairingJob = lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                PairingClient.request(serverUrl, pin, store.deviceId, store.deviceName)
+                PairingClient.request(serverUrl, pin, token, store.deviceId, store.deviceName)
             }
             when (result) {
                 is PairingClient.RequestResult.Approved -> {
-                    // A known device gets its token without an approval dialog on the PC:
-                    // without a pin, the user confirms the code before it is pinned (S8).
+                    // An immediate token skips the PC's approval dialog. Without a pin (no token
+                    // was sent, so only an older server answers like this) the user confirms
+                    // the code before it is pinned (S8).
                     if (CertPin.needsConfirmation(pin, immediateToken = true) &&
                         !confirmCode(result.fingerprint)
                     ) {

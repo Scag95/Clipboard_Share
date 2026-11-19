@@ -109,10 +109,16 @@ token como `?token=`.
 - `POST /clipboard/image`: escribe imagen al clipboard (body binario PNG).
   Tamaño máximo: 10 MiB; si se excede responde `413` sin tocar el clipboard.
 - `POST /pair/request`: body `{"id":"<uuid dispositivo>","name":"<modelo>"}`.
-  Dispositivo ya aprobado → `200 {"token":"..."}` inmediato (reconexión
-  transparente, el token anterior se revoca). Desconocido → `202
-  {"requestId":"..."}` y notificación en el PC para aprobar; el request
-  caduca a los 90 s. Más de 5 requests pendientes de la misma IP → `429`.
+  Dispositivo ya aprobado que manda **su** token vigente en
+  `Authorization: Bearer <token>` → `200 {"token":"..."}` inmediato
+  (reconexión transparente, el token anterior se revoca). Cualquier otro
+  caso → `202 {"requestId":"..."}` y notificación en el PC para aprobar,
+  igual que un teléfono nuevo: dispositivo desconocido, o conocido sin
+  header, con header mal formado, con un token que no es el suyo (aunque sea
+  el token válido de otro dispositivo). Mientras tanto el token anterior
+  sigue valiendo; al aprobar se actualiza la misma entrada (mismo id, token
+  nuevo, nombre e IP al día), sin duplicarla. El request caduca a los 90 s.
+  Más de 5 requests pendientes de la misma IP → `429`.
 - `GET  /pair/status?id=<requestId>`: `pending`; al aprobar, `200
   {"state":"approved","token":"..."}` **una sola vez**; si se denegó, `200
   denied`; si venció, `410 expired`.
@@ -137,8 +143,12 @@ inyecta**; la conexión sigue abierta. Máximo 120 eventos/s por conexión.
 ## Emparejamiento por dentro
 
 El celu guarda el token y abre `/ws/input`. Las reconexiones siguientes son
-automáticas: el servidor reconoce el UUID del dispositivo y re-emite el token
-sin aprobación. El estado (dispositivos y tokens) persiste en
+automáticas: cuando el celu tiene token y pin de esa PC, manda el token en
+`/pair/request` (`Authorization: Bearer`, solo por la conexión con pin, nunca
+al emparejar sin pin) y el servidor, si es el token vigente de ese UUID,
+re-emite uno nuevo sin aprobación. Conocer el UUID no alcanza: sin su token
+vigente la solicitud queda pendiente de aprobación con el código, como la de
+un teléfono nuevo. El estado (dispositivos y tokens) persiste en
 `~/.config/nudge/state.json` (`0600`; en Windows `%APPDATA%\nudge\state.json`)
 y sobrevive reinicios del servidor y del PC.
 
