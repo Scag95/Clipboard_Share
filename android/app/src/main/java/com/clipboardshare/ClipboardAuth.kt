@@ -27,6 +27,17 @@ object ClipboardAuth {
     /** The clipboard sync only runs while the selected host has a token. */
     fun canSync(token: String?): Boolean = headerValue(token) != null
 
+    /** What to do when the PC answers 401 to a request made with [rejectedToken]. */
+    enum class Rejection { HALT_AND_CLEAR, IGNORE_STALE }
+
+    /**
+     * A 401 for a token that is no longer the stored one is stale: pairing already
+     * stored a new token while the request was in flight, so the sync keeps going.
+     */
+    fun onRejected(rejectedToken: String, storedToken: String?): Rejection =
+        if (storedToken != null && storedToken != rejectedToken) Rejection.IGNORE_STALE
+        else Rejection.HALT_AND_CLEAR
+
     fun classify(code: Int): Outcome = when {
         code == 401 -> Outcome.REPAIR
         code in 200..299 -> Outcome.OK

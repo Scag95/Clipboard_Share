@@ -266,9 +266,17 @@ class ClipboardSyncService : Service() {
      */
     private fun haltSync(host: String, rejectedToken: String?) {
         if (syncHalted) return
+        if (rejectedToken != null &&
+            ClipboardAuth.onRejected(rejectedToken, store.getToken(host)) ==
+            ClipboardAuth.Rejection.IGNORE_STALE
+        ) {
+            Log.i(TAG, "Ignoring a stale 401 from $host: a newer token is stored")
+            return
+        }
         syncHalted = true
         if (rejectedToken != null) {
             Log.w(TAG, "Clipboard rejected by $host (401): pairing required")
+            // Compare again at the clear: pairing may store a new token right now.
             if (store.getToken(host) == rejectedToken) store.clearToken(host)
             rejectedHost = host
             clipboardStatus = ClipboardAuth.REPAIR_STATUS

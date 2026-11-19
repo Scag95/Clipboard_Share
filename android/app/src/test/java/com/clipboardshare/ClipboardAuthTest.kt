@@ -8,6 +8,21 @@ import org.junit.Test
 
 class ClipboardAuthTest {
     @Test
+    fun rejectionOfTheStoredTokenHaltsAndClears() {
+        assertEquals(ClipboardAuth.Rejection.HALT_AND_CLEAR, ClipboardAuth.onRejected("abc", "abc"))
+    }
+
+    @Test
+    fun rejectionWhenNoTokenIsStoredHalts() {
+        assertEquals(ClipboardAuth.Rejection.HALT_AND_CLEAR, ClipboardAuth.onRejected("abc", null))
+    }
+
+    @Test
+    fun rejectionOfAStaleTokenIsIgnoredWhenPairingStoredANewOne() {
+        assertEquals(ClipboardAuth.Rejection.IGNORE_STALE, ClipboardAuth.onRejected("old", "new"))
+    }
+
+    @Test
     fun headerNameIsAuthorization() {
         assertEquals("Authorization", ClipboardAuth.HEADER_NAME)
     }
