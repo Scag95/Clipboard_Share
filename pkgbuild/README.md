@@ -5,6 +5,9 @@ Builds the Nudge server and CLI (`nudge`) and the desktop panel
 `prepare()` copies the sources from the parent directory into `src/`, so the
 build leaves no artifacts in the repository tree.
 
+For the user guide (panel, pairing, uinput, migration), see
+[docs/linux.md](../docs/linux.md).
+
 The package was called `clipboard-share` before; `nudge` replaces, conflicts
 with and provides it, so `pacman -U` swaps one for the other.
 

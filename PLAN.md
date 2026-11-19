@@ -10,7 +10,7 @@ Documento para retomar el trabajo en otro equipo/entorno.
 - Cliente Android: descubrimiento NSD + sync bidireccional de texto e imagen
   (PNG) con `OnPrimaryClipChangedListener` y polling cada 2 s.
 - Tests Go: handlers de `internal/api` con store inyectable.
-- Repo: https://github.com/Scag95/Clipboard_Share (rama `main`).
+- Repo: https://github.com/Scag95/Nudge (rama `main`).
 
 ## Pendientes / siguientes pasos
 
@@ -42,7 +42,7 @@ Documento para retomar el trabajo en otro equipo/entorno.
 ### 4. Empaquetado
 - Generar APK release firmado (`./gradlew assembleRelease`).
 - Configurar firma (keystore) y ProGuard/R8.
-- Documentar en README los pasos de build release.
+- Documentar en `docs/android.md` los pasos de build release.
 
 ### 5. Seguridad / robustez
 - ~~Autenticación simple (token compartido)~~ ✅ Evolucionó: pairing por
@@ -57,7 +57,8 @@ Documento para retomar el trabajo en otro equipo/entorno.
   `io.LimitReader`, que no cierra la conexión early). Menor.
 - TLS pendiente: token y eventos viajan por http/ws plano en la LAN; el
   token revocado se aplica en la próxima conexión (no corta un WebSocket
-  vivo). Aceptable para beta personal; documentado en README.
+  vivo). Aceptable para beta personal; documentado en
+  `docs/development.md` (sección Seguridad).
 
 ### 6. Mejoras de UX
 - Notificación de estado de conexión.
@@ -66,8 +67,8 @@ Documento para retomar el trabajo en otro equipo/entorno.
 
 ## Cómo continuar en otro equipo
 
-1. Clonar: `git clone https://github.com/Scag95/Clipboard_Share.git`
-2. Servidor: `cd Clipboard_Share && go mod tidy && go run ./cmd/server`
+1. Clonar: `git clone https://github.com/Scag95/Nudge.git`
+2. Servidor: `cd Nudge && go mod tidy && go run ./cmd/server`
 3. Android: abrir `android/` en Android Studio, sincronizar Gradle, ejecutar en dispositivo.
 4. Crear rama nueva por feature: `git checkout -b feat/<nombre>`.
 5. Hacer PR a `main` y mergear.
