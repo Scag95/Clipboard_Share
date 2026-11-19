@@ -86,6 +86,9 @@ class RemoteControlActivity : AppCompatActivity() {
             runOnUiThread {
                 if (manualDisconnect) {
                     showConnect("Desconectado (a mano)")
+                } else if (reason == InputClient.PIN_MISMATCH) {
+                    authRetryInFlight = false
+                    onPinMismatch()
                 } else if (reason == "unauthorized") {
                     if (authRetryInFlight) {
                         // The replacement token was also rejected: require an explicit request.
@@ -313,15 +316,17 @@ class RemoteControlActivity : AppCompatActivity() {
     private fun connect(isAuthRetry: Boolean = false) {
         manualDisconnect = false
         authRetryInFlight = isAuthRetry
+        // getToken already dropped a token without a pin; a pin is read right after it.
         val token = store.getToken(hostKey)
-        if (token == null) {
+        val pin = store.getPin(hostKey)
+        if (token == null || pin == null) {
             showConnect("Dispositivo: ${store.deviceName}. Toca Conectar para solicitar acceso")
             return
         }
         if (client.connected) return
         hidePairingControls()
         setStatus("Conectando ${store.deviceName}…")
-        client.connect(serverUrl, token, wsListener)
+        client.connect(serverUrl, token, pin, wsListener)
     }
 
     private fun scheduleRetry() {
@@ -347,13 +352,16 @@ class RemoteControlActivity : AppCompatActivity() {
             if (automatic) "Renovando acceso para ${store.deviceName}…"
             else "Solicitando acceso para ${store.deviceName}…"
         )
+        // A paired PC is only reached through its pin; a new pairing trusts the certificate
+        // it is shown and binds the approval polls to it (S6).
+        val pin = store.getPin(hostKey)
         pairingJob = lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                PairingClient.request(serverUrl, store.deviceId, store.deviceName)
+                PairingClient.request(serverUrl, pin, store.deviceId, store.deviceName)
             }
             when (result) {
                 is PairingClient.RequestResult.Approved -> {
-                    store.putToken(hostKey, result.token)
+                    store.putSession(hostKey, result.token, result.fingerprint)
                     // The clipboard sync idles without a token: start it now that there is one.
                     ClipboardSyncService.ensureStarted(this@RemoteControlActivity)
                     connect(isAuthRetry = automatic)
@@ -362,9 +370,14 @@ class RemoteControlActivity : AppCompatActivity() {
                     store.clearToken(hostKey)
                     connectButton.visibility = View.GONE
                     cancelPairingButton.visibility = View.VISIBLE
-                    setStatus("Esperando aprobación en el PC para ${store.deviceName}…")
-                    pollPairingStatus(serverUrl, result.requestId, automatic)
+                    setStatus(
+                        "Esperando aprobación en el PC para ${store.deviceName}…\n" +
+                            CertPin.waitingCodeText(result.fingerprint)
+                    )
+                    // The fingerprint lives only in this job: deny, expiry or cancel drop it.
+                    pollPairingStatus(serverUrl, result.requestId, result.fingerprint, automatic)
                 }
+                PairingClient.RequestResult.PinMismatch -> onPinMismatch()
                 PairingClient.RequestResult.TooManyRequests -> showConnect(
                     "Hay demasiadas solicitudes pendientes. Espera y vuelve a intentar"
                 )
@@ -376,18 +389,24 @@ class RemoteControlActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun pollPairingStatus(url: String, requestId: String, automatic: Boolean) {
+    /** Polls with only the certificate /pair/request saw; its pin is stored on approval. */
+    private suspend fun pollPairingStatus(
+        url: String,
+        requestId: String,
+        fingerprint: String,
+        automatic: Boolean,
+    ) {
         while (lifecycleScope.coroutineContext.isActive) {
             delay(1_500L)
             when (
                 val result = withContext(Dispatchers.IO) {
-                    PairingClient.status(url, requestId)
+                    PairingClient.status(url, requestId, fingerprint)
                 }
             ) {
                 PairingClient.StatusResult.Pending -> Unit
                 is PairingClient.StatusResult.Approved -> {
                     // Status returns the token once, so persist it before opening the socket.
-                    store.putToken(hostKey, result.token)
+                    store.putSession(hostKey, result.token, fingerprint)
                     // The clipboard sync idles without a token: start it now that there is one.
                     ClipboardSyncService.ensureStarted(this@RemoteControlActivity)
                     connect(isAuthRetry = automatic)
@@ -403,12 +422,27 @@ class RemoteControlActivity : AppCompatActivity() {
                     showConnect("La solicitud expiró. Toca Conectar para reintentar")
                     return
                 }
+                PairingClient.StatusResult.PinMismatch -> {
+                    onPinMismatch()
+                    return
+                }
                 PairingClient.StatusResult.Failed -> {
                     showConnect("No se pudo consultar la aprobación. Toca Conectar para reintentar")
                     return
                 }
             }
         }
+    }
+
+    /**
+     * The PC presented a certificate other than the pinned one: forget its token and pin,
+     * stop the clipboard sync with the same message, and wait for an explicit new pairing.
+     */
+    private fun onPinMismatch() {
+        Log.w(TAG, "Certificate of $hostKey does not match its pin: pairing required")
+        store.clearToken(hostKey)
+        ClipboardSyncService.reportPinMismatch(this, hostKey)
+        showConnect(CertPin.MISMATCH_STATUS)
     }
 
     private fun cancelPairing() {

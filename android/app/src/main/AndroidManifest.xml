@@ -20,10 +20,10 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
-    <!-- Beta personal: el server LAN habla http/ws sin TLS (ver PLAN "Seguridad"
-         como trabajo futuro para una versión pública). -->
+    <!-- Todo el tráfico con la PC va por https/wss con un certificado autofirmado
+         que la app fija al emparejar (S6); no hace falta tráfico en claro. -->
     <application
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:label="Nudge"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">

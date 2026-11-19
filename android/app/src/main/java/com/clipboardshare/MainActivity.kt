@@ -74,12 +74,19 @@ class MainActivity : AppCompatActivity() {
     private val resolvingServices = mutableSetOf<String>()
     private val probingHosts = mutableSetOf<String>()
 
-    private val probeClient = OkHttpClient.Builder()
-        .connectTimeout(1_500, TimeUnit.MILLISECONDS)
-        .readTimeout(1_500, TimeUnit.MILLISECONDS)
-        .writeTimeout(1_500, TimeUnit.MILLISECONDS)
-        .callTimeout(1_500, TimeUnit.MILLISECONDS)
-        .build()
+    /**
+     * Reachability only: /health over TLS without a pin (any certificate is accepted)
+     * and never with a token, so nothing secret is sent to an unverified PC (S6).
+     */
+    private val probeClient = PinnedTls.client(
+        OkHttpClient.Builder()
+            .connectTimeout(1_500, TimeUnit.MILLISECONDS)
+            .readTimeout(1_500, TimeUnit.MILLISECONDS)
+            .writeTimeout(1_500, TimeUnit.MILLISECONDS)
+            .callTimeout(1_500, TimeUnit.MILLISECONDS)
+            .build(),
+        pin = null,
+    ).http
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

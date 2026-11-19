@@ -20,8 +20,23 @@ object HostAddress {
     fun isUsable(host: String): Boolean =
         host.isNotEmpty() && '%' !in host && !host.startsWith("fe80:", ignoreCase = true)
 
+    /** Every app <-> server call is HTTPS (S6); the PC presents a pinned self-signed certificate. */
     fun serverUrl(host: String, port: Int): String {
         val address = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
-        return "http://$address:$port"
+        return "https://$address:$port"
     }
+
+    /** The server URL of a `host:port` session key, or null when the key has no valid port. */
+    fun serverUrlForHostKey(key: String): String? {
+        val separator = key.lastIndexOf(':')
+        if (separator <= 0 || separator == key.lastIndex) return null
+        val host = key.substring(0, separator)
+        val port = key.substring(separator + 1).toIntOrNull() ?: return null
+        if (port !in 1..65535) return null
+        return serverUrl(host, port)
+    }
+
+    /** The WebSocket (wss) URL of [path] on the server at [serverUrl], built by [serverUrl]. */
+    fun webSocketUrl(serverUrl: String, path: String): String =
+        "wss://" + serverUrl.substringAfter("://") + path
 }

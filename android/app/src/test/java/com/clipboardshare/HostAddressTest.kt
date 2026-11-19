@@ -31,8 +31,34 @@ class HostAddressTest {
 
     @Test
     fun serverUrlBracketsIpv6AndLeavesIpv4Alone() {
-        assertEquals("http://[2001:db8::5]:8765", HostAddress.serverUrl("2001:db8::5", 8765))
-        assertEquals("http://192.168.0.14:8765", HostAddress.serverUrl("192.168.0.14", 8765))
+        assertEquals("https://[2001:db8::5]:8765", HostAddress.serverUrl("2001:db8::5", 8765))
+        assertEquals("https://192.168.0.14:8765", HostAddress.serverUrl("192.168.0.14", 8765))
+    }
+
+    @Test
+    fun webSocketUrlIsWssOnTheSameHostAndPort() {
+        assertEquals(
+            "wss://192.168.0.14:8765/ws/input",
+            HostAddress.webSocketUrl("https://192.168.0.14:8765", "/ws/input"),
+        )
+        assertEquals(
+            "wss://[2001:db8::5]:8765/ws/input",
+            HostAddress.webSocketUrl("https://[2001:db8::5]:8765", "/ws/input"),
+        )
+    }
+
+    @Test
+    fun serverUrlForHostKeyIsHttps() {
+        assertEquals("https://192.168.0.14:8765", HostAddress.serverUrlForHostKey("192.168.0.14:8765"))
+        assertEquals("https://[2001:db8::5]:8765", HostAddress.serverUrlForHostKey("2001:db8::5:8765"))
+        assertEquals("https://[2001:db8::5]:8765", HostAddress.serverUrlForHostKey("[2001:db8::5]:8765"))
+    }
+
+    @Test
+    fun serverUrlForHostKeyRejectsKeysWithoutAValidPort() {
+        for (bad in listOf("", "host", ":8765", "host:", "host:0", "host:65536", "host:abc")) {
+            assertNull(bad, HostAddress.serverUrlForHostKey(bad))
+        }
     }
 
     @Test
