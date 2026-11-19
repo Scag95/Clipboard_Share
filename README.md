@@ -13,8 +13,7 @@ Nudge hace eso entre un teléfono Android y una PC con Linux o Windows que
 estén en la misma WiFi. El celu encuentra la PC solo (mDNS) y todo pasa por la
 red local: no hay cuentas, ni nube, ni cables.
 
-Antes se llamaba Clipboard Share. Si venías usando esa versión, mirá
-[Migración desde clipboard-share](docs/linux.md#migración-desde-clipboard-share).
+Antes se llamaba Clipboard Share.
 
 ## Qué hace
 
@@ -71,10 +70,29 @@ clipboard con la app cerrada hacen falta dos comandos de `adb`, explicados en
 2. En la PC aparece la solicitud con el nombre del teléfono: en Linux, un
    aviso en la bandeja que abre el panel; en Windows, una notificación en la
    bandeja y una ventana Sí/No (con No por defecto).
-3. La aprobás. La solicitud caduca a los 90 s si no hacés nada.
-4. De ahí en más el celu se reconecta solo, incluso después de reiniciar la
+3. Compará el código de verificación: el celu muestra uno como
+   `4F2A-91C7-0B3E` y la PC el mismo (en el panel, en la ventana Sí/No o con
+   `nudge pair list`). Si no coinciden, rechazá: otro equipo se está haciendo
+   pasar por tu PC.
+4. La aprobás. La solicitud caduca a los 90 s si no hacés nada.
+5. De ahí en más el celu se reconecta solo, incluso después de reiniciar la
    PC. Si perdés el teléfono, lo revocás desde el panel o con
    `nudge pair revoke`.
+
+El código de la PC se puede ver en cualquier momento, haya o no solicitudes:
+en el panel de Nudge (Linux), en el menú del ícono de la bandeja (Windows,
+clic derecho: `Código: XXXX-XXXX-XXXX`) o con `nudge pair list`. Un
+teléfono que la PC ya conocía solo recibe acceso sin aprobación si presenta
+su token vigente por la conexión cifrada; si no lo tiene (por ejemplo,
+después del aviso "El certificado de la PC cambió"), la PC vuelve a mostrar
+la solicitud con el código, como para un teléfono nuevo. Si una PC con una
+versión anterior de Nudge igual da acceso sin ventana de aprobación, el
+celu pregunta "¿La PC muestra el código …?" antes de guardarla: tocá
+**Sí, coincide** solo si es el mismo; con **No** no se guarda nada y el
+emparejamiento se cancela.
+
+Si borrás la configuración del servidor (o solo su clave, `tls.key`), la PC
+genera otro certificado y cada teléfono tiene que emparejarse de nuevo.
 
 ## Privacidad y seguridad
 
@@ -83,9 +101,12 @@ clipboard con la app cerrada hacen falta dos comandos de `adb`, explicados en
   tiene su token.
 - Cualquiera en la red puede *pedir* emparejarse, por eso aprobar es siempre
   un clic tuyo. El panel nunca aprueba solo.
-- **El clipboard no tiene autenticación**: cualquiera en la misma red puede
-  leerlo y escribirlo. Y no hay TLS, así que el tráfico va sin cifrar. Usalo
-  en redes de confianza (la de tu casa, no la del café).
+- Todo el tráfico entre el celu y la PC va cifrado (HTTPS y WSS) con un
+  certificado autofirmado de la PC. Al emparejar, el celu guarda su huella y
+  después rechaza cualquier otro certificado; el código de verificación es
+  lo que te protege en ese primer contacto.
+- El portapapeles, igual que el mouse y el teclado, solo responde a
+  teléfonos que aprobaste: sin su token, la PC no deja leerlo ni escribirlo.
 - La app de Android no guarda en sus logs lo que copiás, solo el tipo y el
   tamaño.
 
@@ -103,12 +124,16 @@ El detalle de qué está hecho y qué falta está en
 ## Documentación
 
 - [Linux](docs/linux.md): paquete, panel, inicio automático, permisos de
-  uinput, puerto, migración.
+  uinput, puerto.
 - [Windows](docs/windows.md): instalación, emparejamiento, firewall,
   desinstalación, log.
 - [Android](docs/android.md): APK, sync en segundo plano y cómo funciona.
 - [Desarrollo](docs/development.md): arquitectura, compilar, API HTTP,
   protocolo de control remoto, tests.
+- [Preguntas frecuentes](docs/faq.md): el celu no encuentra la PC, uinput,
+  permisos de Android, certificado, versiones, re-emparejar tras la 1.0, log.
+
+Los cambios de cada versión están en el [CHANGELOG](CHANGELOG.md).
 
 ## Licencia
 

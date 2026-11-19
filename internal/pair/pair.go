@@ -101,6 +101,9 @@ type Broker struct {
 	pending   map[string]*pendingRequest
 	sequence  uint64
 	onRequest func(RequestInfo)
+	// The server certificate's identity, shown by `list` (see SetVerification).
+	fingerprint string
+	code        string
 }
 
 // NewBroker returns an empty broker using StatePath for persistence. Use Load
@@ -210,22 +213,43 @@ func cloneDevices(devices map[string]device) map[string]device {
 	return cloned
 }
 
+// SetVerification records the TLS certificate's fingerprint and verification
+// code so the control socket's `list` can show them to the user.
+func (b *Broker) SetVerification(fingerprint, code string) {
+	b.mu.Lock()
+	b.fingerprint, b.code = fingerprint, code
+	b.mu.Unlock()
+}
+
+// Verification returns what SetVerification recorded.
+func (b *Broker) Verification() (fingerprint, code string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.fingerprint, b.code
+}
+
 // OnRequest registers a callback invoked outside the broker lock whenever a
-// new, unknown device creates a pending request. Known re-pairs do not notify.
+// request becomes pending: a new device, or a known device that did not
+// present its own current token. Token-authenticated re-pairs do not notify.
 func (b *Broker) OnRequest(fn func(RequestInfo)) {
 	b.mu.Lock()
 	b.onRequest = fn
 	b.mu.Unlock()
 }
 
-// Request starts pairing for an unknown identity. A known identity gets a new
-// token immediately, atomically revoking and replacing its previous token.
-func (b *Broker) Request(id, name, ip string) (RequestResult, error) {
+// Request starts pairing. A known identity whose presentedToken equals its
+// own current token (constant-time compare) gets a new token immediately,
+// atomically revoking and replacing the previous one. Every other request
+// (new identity, or a known identity with an empty, wrong or other device's
+// token) becomes pending and needs approval; until then the known device's
+// current token stays valid, and approval updates that same device entry.
+func (b *Broker) Request(id, name, ip, presentedToken string) (RequestResult, error) {
 	if id == "" || name == "" {
 		return RequestResult{}, ErrInvalid
 	}
 	b.mu.Lock()
-	if d, ok := b.devices[id]; ok {
+	if d, ok := b.devices[id]; ok && presentedToken != "" &&
+		subtle.ConstantTimeCompare([]byte(d.Token), []byte(presentedToken)) == 1 {
 		token := randomToken()
 		d.Name = name
 		d.IP = ip
@@ -326,14 +350,20 @@ func (b *Broker) ApproveLast() error {
 	return b.approveLocked(newest)
 }
 
+// approveLocked issues a new token for req. A known identity keeps its entry
+// (and FirstApproved); its name, IP and token are replaced.
 func (b *Broker) approveLocked(req *pendingRequest) error {
 	token := randomToken()
+	firstApproved := b.now()
+	if existing, ok := b.devices[req.ID]; ok {
+		firstApproved = existing.FirstApproved
+	}
 	d := device{
 		ID:            req.ID,
 		Name:          req.Name,
 		Token:         token,
 		IP:            req.IP,
-		FirstApproved: b.now(),
+		FirstApproved: firstApproved,
 	}
 	next := cloneDevices(b.devices)
 	next[d.ID] = d
@@ -479,11 +509,14 @@ type controlCommand struct {
 }
 
 type controlResponse struct {
-	OK       bool          `json:"ok"`
-	Error    string        `json:"error,omitempty"`
-	Message  string        `json:"message,omitempty"`
-	Requests []RequestInfo `json:"requests"`
-	Devices  []DeviceInfo  `json:"devices"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
+	// Code and Fingerprint are only set on `list`.
+	Code        string        `json:"code,omitempty"`
+	Fingerprint string        `json:"fingerprint,omitempty"`
+	Requests    []RequestInfo `json:"requests"`
+	Devices     []DeviceInfo  `json:"devices"`
 }
 
 // isSocketLike reports whether an existing control path may be a (stale)
@@ -584,7 +617,8 @@ func (b *Broker) control(command controlCommand) controlResponse {
 	switch command.Cmd {
 	case "list":
 		devices, requests := b.Snapshot()
-		return controlResponse{OK: true, Requests: requests, Devices: devices}
+		fingerprint, code := b.Verification()
+		return controlResponse{OK: true, Code: code, Fingerprint: fingerprint, Requests: requests, Devices: devices}
 	case "approve-last":
 		if err := b.ApproveLast(); err != nil {
 			return controlResponse{Error: err.Error()}

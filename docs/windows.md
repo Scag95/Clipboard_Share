@@ -40,15 +40,36 @@ antes el SHA256 (`certutil -hashfile <zip> SHA256`).
 
 Cuando un teléfono pide emparejarse, el ícono de la bandeja muestra una
 notificación ("Solicitud de emparejamiento") y aparece una ventana **Sí/No**
-con su nombre e IP, con **No** como botón por defecto (un Enter sin querer
-rechaza). La ventana es el único lugar donde se aprueba. El CLI también
-sirve, desde una terminal nueva: `nudge pair list` y `nudge pair --last`.
+con su nombre, su IP y el código de verificación de la PC
+(`Código: XXXX-XXXX-XXXX`), con **No** como botón por defecto (un Enter sin
+querer rechaza). Elegí **Sí** solo si el teléfono muestra el mismo código.
+La ventana es el único lugar donde se aprueba. El CLI también sirve, desde
+una terminal nueva: `nudge pair list` (la primera línea es
+`Verification code: ...`) y `nudge pair --last`.
+
+El código también está siempre en el menú del ícono de la bandeja (ver
+abajo). Un teléfono que la PC ya conocía solo se reconecta sin ventana
+Sí/No si presenta su token vigente por la conexión cifrada; si no lo tiene
+(por ejemplo, después del aviso "El certificado de la PC cambió"), vuelve a
+aparecer la ventana Sí/No con el código, como para un teléfono nuevo. Si
+una PC con una versión anterior de Nudge igual le da acceso sin ventana,
+el teléfono pregunta "¿La PC muestra el código …?": tocá **Sí, coincide**
+solo si es el mismo que ves en la bandeja o con `nudge pair list`. Con
+**No** el teléfono no guarda nada y cancela el emparejamiento.
+
+El tráfico con el teléfono va cifrado (HTTPS/WSS) con un certificado
+autofirmado que el servidor guarda en `%APPDATA%\nudge\tls.crt` y
+`%APPDATA%\nudge\tls.key`; el teléfono lo recuerda al emparejar. Si borrás
+`tls.key` (o `%APPDATA%\nudge`, por ejemplo al desinstalar con borrado de
+datos), el servidor genera otro y **cada teléfono tiene que emparejarse de
+nuevo**.
 
 ## Ícono en la bandeja
 
 Mientras el servidor corre, Nudge tiene un ícono en el área de notificación.
-Con clic derecho muestra el estado ("Escuchando en el puerto 8765") y los
-teléfonos emparejados con su IP ("Ningún teléfono emparejado" si no hay).
+Con clic derecho muestra el estado ("Escuchando en el puerto 8765"), el
+código de verificación de la PC (`Código: XXXX-XXXX-XXXX`) y los teléfonos
+emparejados con su IP ("Ningún teléfono emparejado" si no hay).
 Es solo informativo: para revocar un teléfono usá
 `nudge pair revoke --device <id>` (el id sale en `nudge pair list`). Si
 Windows esconde el ícono, está en la flechita "Mostrar iconos ocultos". Si

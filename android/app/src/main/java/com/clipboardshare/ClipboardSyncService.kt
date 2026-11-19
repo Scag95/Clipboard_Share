@@ -25,9 +25,11 @@ import android.provider.Settings
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -47,7 +49,7 @@ import java.util.concurrent.TimeUnit
 class ClipboardSyncService : Service() {
 
     companion object {
-        private const val TAG = "ClipboardShare"
+        private const val TAG = "Nudge"
         private const val CHANNEL_ID = "clipboard_sync"
         private const val NOTIFICATION_ID = 1001
         private const val POLL_MS = 2_000L
@@ -57,6 +59,16 @@ class ClipboardSyncService : Service() {
         @Volatile
         var clipboardStatus: String = "Sincronización inactiva"
             private set
+
+        /**
+         * Host whose PC answered 401 or showed a certificate other than its pin: its
+         * re-pair message ([rejectedStatus]) stays until it syncs again.
+         */
+        @Volatile
+        private var rejectedHost: String? = null
+
+        @Volatile
+        private var rejectedStatus: String = ClipboardAuth.REPAIR_STATUS
 
         /**
          * Started activities of this app. Android 10+ lets only the focused app read
@@ -86,12 +98,34 @@ class ClipboardSyncService : Service() {
 
         // Timing constants and their required order are documented in ClipboardTriggerPolicy.
 
+        /**
+         * Starts the sync for the selected host only when that host has a token; without
+         * one every clipboard call would get 401, so the service is stopped and stays idle.
+         * Called again after pairing stores a token.
+         */
         fun ensureStarted(context: Context) {
             val appContext = context.applicationContext
-            ContextCompat.startForegroundService(
-                appContext,
-                Intent(appContext, ClipboardSyncService::class.java),
-            )
+            val intent = Intent(appContext, ClipboardSyncService::class.java)
+            val store = SessionStore(appContext)
+            val host = store.selectedHost?.takeIf { it.isNotBlank() }
+            if (host == null || !ClipboardAuth.canSync(store.getToken(host))) {
+                Log.d(TAG, "Clipboard sync idle: no token for the selected host")
+                appContext.stopService(intent)
+                if (host != rejectedHost) clipboardStatus = "Sincronización inactiva"
+                return
+            }
+            ContextCompat.startForegroundService(appContext, intent)
+        }
+
+        /**
+         * Another connection to [host] met a certificate other than its pin and already
+         * cleared the token and pin: the clipboard shows the same message and stops.
+         */
+        fun reportPinMismatch(context: Context, host: String) {
+            rejectedStatus = CertPin.MISMATCH_STATUS
+            rejectedHost = host
+            clipboardStatus = CertPin.MISMATCH_STATUS
+            ensureStarted(context)
         }
     }
 
@@ -108,16 +142,27 @@ class ClipboardSyncService : Service() {
             if (isImage) png?.contentHashCode() ?: 0 else text?.hashCode() ?: 0
     }
 
+    /** A clipboard call got 401: kept apart from transient failures, which are retried. */
+    private class ClipboardUnauthorizedException(path: String) : Exception("HTTP 401 on $path")
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val clipboardClient = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
+
+    /** Client for the pin in use, reused across polls; replaced when the pin changes. */
+    @Volatile private var pinnedClient: PinnedClient? = null
     private val clipPrefs by lazy { getSharedPreferences("clip_settings", Context.MODE_PRIVATE) }
+    private val store by lazy { SessionStore(this) }
 
     private lateinit var clipboardManager: ClipboardManager
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
     @Volatile private var syncStarted = false
+    private var syncJob: Job? = null
+
+    /** Set when the token was rejected or removed; the sync is being stopped. */
+    @Volatile private var syncHalted = false
 
     @Volatile private var serverUrl = ""
     @Volatile private var hostKey = ""
@@ -162,8 +207,8 @@ class ClipboardSyncService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val selectedHost = SessionStore(this).selectedHost?.takeIf { it.isNotBlank() }
-        val selectedUrl = selectedHost?.let(::serverUrlForHostKey)
+        val selectedHost = store.selectedHost?.takeIf { it.isNotBlank() }
+        val selectedUrl = selectedHost?.let(HostAddress::serverUrlForHostKey)
         if (selectedHost == null || selectedUrl == null) {
             Log.w(TAG, "Clipboard sync stopped: no valid selected host")
             clipboardStatus = "Sincronización inactiva"
@@ -171,18 +216,31 @@ class ClipboardSyncService : Service() {
             return START_STICKY
         }
 
+        // A foreground notification is installed before any network or clipboard work,
+        // and also before stopping, as startForegroundService requires.
+        if (!ClipboardAuth.canSync(store.getToken(selectedHost))) {
+            startForegroundWithNotification(connected = true)
+            // Without a token every clipboard call would get 401: do not poll at all.
+            Log.w(TAG, "Clipboard sync idle: no token for $selectedHost")
+            stopSync()
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_STICKY
+        }
         val hostChanged = hostKey != selectedHost
         hostKey = selectedHost
         serverUrl = selectedUrl
-        if (hostChanged) {
+        startForegroundWithNotification(connected = true)
+        val resumedAfterHalt = syncHalted || rejectedHost == selectedHost
+        syncHalted = false
+        if (rejectedHost == selectedHost) rejectedHost = null
+        if (hostChanged || resumedAfterHalt) {
             lastSyncedItem = null
             consecutiveNetworkFailures = 0
             notificationConnected = true
             clipboardStatus = "Conectando con $selectedHost…"
         }
 
-        // A foreground notification is installed before any network or clipboard work.
-        startForegroundWithNotification(connected = true)
         if (!syncStarted) {
             syncStarted = true
             Log.d(TAG, "Clipboard sync started for $selectedHost")
@@ -196,26 +254,77 @@ class ClipboardSyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        clipListener?.let(clipboardManager::removePrimaryClipChangedListener)
-        clipListener = null
-        synchronized(logWatcherLock) { syncStarted = false }
-        stopLogWatcher()
+        stopSync()
         mainHandler.removeCallbacksAndMessages(null)
         instance = null
         serviceScope.cancel()
-        clipboardStatus = "Sincronización inactiva"
+        // A rejected host keeps asking to pair again; any other stop is just inactive.
+        val rejected = rejectedHost
+        clipboardStatus = if (rejected != null && rejected == store.selectedHost) {
+            rejectedStatus
+        } else {
+            "Sincronización inactiva"
+        }
         Log.d(TAG, "Clipboard sync stopped")
         super.onDestroy()
     }
 
-    private fun serverUrlForHostKey(key: String): String? {
-        val separator = key.lastIndexOf(':')
-        if (separator <= 0 || separator == key.lastIndex) return null
-        val host = key.substring(0, separator)
-        val port = key.substring(separator + 1).toIntOrNull() ?: return null
-        if (port !in 1..65535) return null
-        val address = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
-        return "http://$address:$port"
+    /** Stops the listener, the poll loop and the log watcher. Main thread only. */
+    private fun stopSync() {
+        clipListener?.let(clipboardManager::removePrimaryClipChangedListener)
+        clipListener = null
+        synchronized(logWatcherLock) { syncStarted = false }
+        syncJob?.cancel()
+        syncJob = null
+        stopLogWatcher()
+    }
+
+    /**
+     * Stops the sync because the PC rejected the token (401), presented a certificate
+     * other than the pin, or the token is gone. On a rejection the stored token and pin
+     * are cleared, as the remote control does on "unauthorized", unless pairing already
+     * stored a different one; [repairStatus] is then shown. Runs under syncMutex.
+     */
+    private fun haltSync(
+        host: String,
+        rejectedToken: String?,
+        repairStatus: String = ClipboardAuth.REPAIR_STATUS,
+    ) {
+        if (syncHalted) return
+        if (rejectedToken != null &&
+            ClipboardAuth.onRejected(rejectedToken, store.getToken(host)) ==
+            ClipboardAuth.Rejection.IGNORE_STALE
+        ) {
+            Log.i(TAG, "Ignoring a stale rejection from $host: a newer token is stored")
+            return
+        }
+        syncHalted = true
+        if (rejectedToken != null) {
+            Log.w(TAG, "Clipboard rejected by $host: pairing required ($repairStatus)")
+            // Compare again at the clear: pairing may store a new token right now.
+            if (store.getToken(host) == rejectedToken) store.clearToken(host)
+            rejectedStatus = repairStatus
+            rejectedHost = host
+            clipboardStatus = repairStatus
+        } else {
+            Log.w(TAG, "Clipboard sync halted: no token for $host")
+            // The remote control may have cleared it on a certificate change.
+            clipboardStatus = if (rejectedHost == host) rejectedStatus else "Sincronización inactiva"
+        }
+        mainHandler.post {
+            // A new token or another host may have restarted the sync in the meantime.
+            if (!syncHalted || hostKey != host) return@post
+            stopSync()
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
+    /** The client trusting only [pin]; a new one (new TLS sessions) when the pin changes. */
+    private fun clientFor(pin: String): PinnedClient {
+        pinnedClient?.takeIf { it.trustManager.pin == pin && !it.trustManager.mismatchSeen }
+            ?.let { return it }
+        return PinnedTls.client(clipboardClient, pin).also { pinnedClient = it }
     }
 
     private fun createNotificationChannel() {
@@ -270,6 +379,8 @@ class ClipboardSyncService : Service() {
     }
 
     private fun updateNotification(connected: Boolean) {
+        // An ongoing notification posted while stopping would outlive the service.
+        if (syncHalted) return
         notificationConnected = connected
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, buildNotification(connected))
@@ -285,18 +396,50 @@ class ClipboardSyncService : Service() {
     }
 
     private fun startSyncLoop() {
-        serviceScope.launch {
+        syncJob = serviceScope.launch {
+            var firstPoll = true
+            var lastPollReachedServer = true
             while (isActive) {
                 // READ_LOGS can be granted while the service runs: start the watcher then.
                 startLogWatcher()
-                syncMutex.withLock { recordPollResult(runSync()) }
+                syncMutex.withLock {
+                    if (ProtocolCompat.probeBeforePoll(firstPoll, lastPollReachedServer)) {
+                        firstPoll = false
+                        checkProtocol()
+                    }
+                    if (syncHalted) return@withLock
+                    val reached = runSync()
+                    lastPollReachedServer = reached
+                    recordPollResult(reached)
+                }
                 delay(POLL_MS)
             }
         }
     }
 
+    /**
+     * One /health over the pinned client, without the token (#12). A PC with another (or no)
+     * protocol stops the sync and its message stays as the clipboard status; the token and
+     * pin are kept. An unreachable PC or a certificate problem is left to runSync, as before.
+     * Runs under syncMutex.
+     */
+    private fun checkProtocol() {
+        val host = hostKey
+        val url = serverUrl
+        if (syncHalted || url.isEmpty()) return
+        val pin = store.getPin(host) ?: return
+        val probe = HealthCheck.probe(PinnedTls.client(HealthCheck.baseClient, pin).http, url)
+        val message = ProtocolCompat.blockingMessage(probe) ?: return
+        Log.w(TAG, "Clipboard sync stopped: $host speaks another protocol ($probe)")
+        rejectedStatus = message
+        rejectedHost = host
+        // No token is passed, so nothing is cleared; the status shows rejectedStatus.
+        haltSync(host, rejectedToken = null)
+    }
+
     /** Only polling outcomes control the three-failure notification threshold. */
     private fun recordPollResult(networkAvailable: Boolean) {
+        if (syncHalted) return
         if (networkAvailable) {
             if (consecutiveNetworkFailures >= DISCONNECTED_FAILURES) {
                 Log.d(TAG, "Clipboard host reachable again: $hostKey")
@@ -324,6 +467,17 @@ class ClipboardSyncService : Service() {
         val targetUrl = serverUrl
         val targetHost = hostKey
         if (targetUrl.isEmpty()) return false
+        if (syncHalted) return true
+        // Read per step: pairing can replace or remove the token while the service runs.
+        // getToken drops a token stored without a pin (paired before TLS).
+        val token = store.getToken(targetHost)
+        val pin = store.getPin(targetHost)
+        val auth = ClipboardAuth.headerValue(token)
+        if (auth == null || pin == null) {
+            haltSync(targetHost, rejectedToken = null)
+            return true
+        }
+        val client = clientFor(pin)
         return try {
             // Read on every step so the UI checkbox takes effect without a restart.
             shareImagesEnabled = clipPrefs.getBoolean("share_images", false)
@@ -346,7 +500,7 @@ class ClipboardSyncService : Service() {
                     clipboardStatus = "Imagen local no compartida"
                     return true
                 }
-                if (!push(targetUrl, local)) {
+                if (!push(client, targetUrl, auth, local)) {
                     // Retry on the next poll because the server did not accept it.
                     Log.e(TAG, "push failed; item not marked synced")
                     clipboardStatus = "Error al enviar el portapapeles"
@@ -356,7 +510,7 @@ class ClipboardSyncService : Service() {
                 clipboardStatus = "Portapapeles sincronizado"
                 return true
             }
-            val remote = fetchRemoteClip(targetUrl)
+            val remote = fetchRemoteClip(client, targetUrl, auth)
             if (remote != null && remote != lastSyncedItem) {
                 if (local?.isImage == true && !shareImagesEnabled) return true
                 // A phone copy was just detected and is being read: it wins, so do not
@@ -369,7 +523,17 @@ class ClipboardSyncService : Service() {
                 clipboardStatus = "Sincronización activa$statusSuffix"
             }
             true
+        } catch (e: ClipboardUnauthorizedException) {
+            // The PC was reached and refused this phone: stop instead of retrying.
+            haltSync(targetHost, rejectedToken = token)
+            true
         } catch (e: Exception) {
+            if (client.isMismatch(e)) {
+                // Not the PC that was paired (or its certificate was regenerated): stop.
+                pinnedClient = null
+                haltSync(targetHost, rejectedToken = token, repairStatus = CertPin.MISMATCH_STATUS)
+                return true
+            }
             Log.e(TAG, "Sync error with $targetHost: ${e.message}")
             clipboardStatus = "Sin conexión con $targetHost"
             false
@@ -601,11 +765,11 @@ class ClipboardSyncService : Service() {
     }
 
     /** Push returns true only when the server accepted the content (2xx). */
-    private fun push(url: String, item: ClipItem): Boolean {
+    private fun push(client: PinnedClient, url: String, auth: String, item: ClipItem): Boolean {
         return if (item.isImage) {
-            setImage(url, item.png ?: ByteArray(0))
+            setImage(client, url, auth, item.png ?: ByteArray(0))
         } else {
-            setText(url, item.text ?: "")
+            setText(client, url, auth, item.text ?: "")
         }
     }
 
@@ -641,30 +805,43 @@ class ClipboardSyncService : Service() {
         }
     }
 
-    private fun fetchRemoteClip(url: String): ClipItem? {
+    private fun fetchRemoteClip(client: PinnedClient, url: String, auth: String): ClipItem? {
         if (shareImagesEnabled) {
-            getImage(url)?.let { if (it.isNotEmpty()) return ClipItem(true, null, it) }
+            getImage(client, url, auth)?.let { if (it.isNotEmpty()) return ClipItem(true, null, it) }
         }
-        val text = getText(url)
+        val text = getText(client, url, auth)
         if (!text.isNullOrEmpty()) return ClipItem(false, text, null)
         return null
     }
 
-    private fun getText(url: String): String? {
-        val req = Request.Builder().url("$url/clipboard/text").get().build()
-        clipboardClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return null
+    /** Every clipboard request carries the selected host's token in the Authorization header. */
+    private fun clipboardRequest(url: String, path: String, auth: String): Request.Builder =
+        Request.Builder().url("$url$path").header(ClipboardAuth.HEADER_NAME, auth)
+
+    /** Classifies the response; a 401 is thrown so it is never mistaken for "no content". */
+    private fun outcomeOf(path: String, code: Int): ClipboardAuth.Outcome {
+        val outcome = ClipboardAuth.classify(code)
+        if (outcome == ClipboardAuth.Outcome.REPAIR) throw ClipboardUnauthorizedException(path)
+        return outcome
+    }
+
+    private fun getText(client: PinnedClient, url: String, auth: String): String? {
+        val path = "/clipboard/text"
+        val req = clipboardRequest(url, path, auth).get().build()
+        client.http.newCall(req).execute().use { resp ->
+            if (outcomeOf(path, resp.code) != ClipboardAuth.Outcome.OK) return null
             val body = resp.body?.string() ?: return null
             return JSONObject(body).optString("text", "")
         }
     }
 
-    private fun setText(url: String, text: String): Boolean {
+    private fun setText(client: PinnedClient, url: String, auth: String, text: String): Boolean {
+        val path = "/clipboard/text"
         val json = JSONObject().put("text", text).toString()
         val body = json.toRequestBody("application/json".toMediaType())
-        val req = Request.Builder().url("$url/clipboard/text").post(body).build()
-        clipboardClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
+        val req = clipboardRequest(url, path, auth).post(body).build()
+        client.http.newCall(req).execute().use { resp ->
+            if (outcomeOf(path, resp.code) != ClipboardAuth.Outcome.OK) {
                 Log.e(TAG, "setText push: HTTP ${resp.code}")
                 return false
             }
@@ -672,20 +849,23 @@ class ClipboardSyncService : Service() {
         }
     }
 
-    private fun getImage(url: String): ByteArray? {
-        val req = Request.Builder().url("$url/clipboard/image").get().build()
-        clipboardClient.newCall(req).execute().use { resp ->
+    private fun getImage(client: PinnedClient, url: String, auth: String): ByteArray? {
+        val path = "/clipboard/image"
+        val req = clipboardRequest(url, path, auth).get().build()
+        client.http.newCall(req).execute().use { resp ->
+            // 401 throws; 204 (no image) and other failures still mean "no remote image".
+            if (outcomeOf(path, resp.code) != ClipboardAuth.Outcome.OK) return null
             if (resp.code == 204) return null
-            if (!resp.isSuccessful) return null
             return resp.body?.bytes()
         }
     }
 
-    private fun setImage(url: String, data: ByteArray): Boolean {
+    private fun setImage(client: PinnedClient, url: String, auth: String, data: ByteArray): Boolean {
+        val path = "/clipboard/image"
         val body = data.toRequestBody("image/png".toMediaType())
-        val req = Request.Builder().url("$url/clipboard/image").post(body).build()
-        clipboardClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
+        val req = clipboardRequest(url, path, auth).post(body).build()
+        client.http.newCall(req).execute().use { resp ->
+            if (outcomeOf(path, resp.code) != ClipboardAuth.Outcome.OK) {
                 Log.e(TAG, "setImage push: HTTP ${resp.code}")
                 return false
             }

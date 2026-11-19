@@ -49,14 +49,22 @@ public:
 
     QJsonObject nextResponse(const QJsonObject &command) {
         const auto cmd = command.value("cmd").toString();
-        if (cmd == "list")
-            return {{"ok", true}, {"requests", requests}, {"devices", devices}};
+        if (cmd == "list") {
+            QJsonObject list{{"ok", true}, {"requests", requests}, {"devices", devices}};
+            // Like the Go server: the certificate's code and fingerprint, only on list.
+            if (!code.isEmpty()) {
+                list.insert("code", code);
+                list.insert("fingerprint", fingerprint);
+            }
+            return list;
+        }
         if (!actionError.isEmpty())
             return {{"ok", false}, {"error", actionError}, {"requests", QJsonValue::Null}, {"devices", QJsonValue::Null}};
         return {{"ok", true}, {"message", actionMessage}, {"requests", QJsonValue::Null}, {"devices", QJsonValue::Null}};
     }
 
     QJsonArray requests, devices;
+    QString code, fingerprint;
     QString actionMessage = "Approved pair request.";
     QString actionError;
     bool silent = false;

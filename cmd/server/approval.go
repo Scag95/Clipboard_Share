@@ -28,6 +28,7 @@ type approvalBroker interface {
 	Snapshot() ([]pair.DeviceInfo, []pair.RequestInfo)
 	Approve(requestID string) error
 	Deny(requestID string) error
+	Verification() (fingerprint, code string)
 }
 
 // sanitizeDialogField makes LAN-supplied text safe to show: control and
@@ -57,8 +58,9 @@ func sanitizeDialogField(s string, max int) string {
 	return string(out)
 }
 
-// approvalText is the Spanish dialog body for a pairing request.
-func approvalText(req pair.RequestInfo) string {
+// approvalText is the Spanish dialog body for a pairing request; code is the
+// verification code the phone shows for the same certificate.
+func approvalText(req pair.RequestInfo, code string) string {
 	name := sanitizeDialogField(req.Name, maxDialogName)
 	if name == "" {
 		name = "(sin nombre)"
@@ -68,9 +70,10 @@ func approvalText(req pair.RequestInfo) string {
 		ip = "(desconocida)"
 	}
 	return fmt.Sprintf("Un teléfono quiere emparejarse con este equipo.\n\n"+
-		"Nombre: %s\nIP: %s\n\n"+
+		"Nombre: %s\nIP: %s\nCódigo: %s\n\n"+
+		"Comprobá que el teléfono muestre el mismo código.\n\n"+
 		"¿Permitir que controle el portapapeles, el ratón y el teclado de este equipo?\n\n"+
-		"Si no reconocés este dispositivo, elegí No.", name, ip)
+		"Si no reconocés este dispositivo, elegí No.", name, ip, code)
 }
 
 // approvalQueue shows one dialog at a time. Requests beyond the queue
@@ -129,7 +132,8 @@ func (q *approvalQueue) handle(req pair.RequestInfo) {
 	if !q.pending(req.RequestID) {
 		return
 	}
-	answer := q.show(approvalTitle, approvalText(req))
+	_, code := q.broker.Verification()
+	answer := q.show(approvalTitle, approvalText(req, code))
 	if !q.pending(req.RequestID) {
 		q.logf("pairing request %s no longer pending, dialog answer ignored", shortID(req.RequestID))
 		return

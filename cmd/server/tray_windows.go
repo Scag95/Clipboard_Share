@@ -322,7 +322,8 @@ func (t *winTray) showNotices() {
 
 func (t *winTray) showMenu() {
 	devices, _ := t.broker.Snapshot()
-	model := trayMenuModel(t.port, devices)
+	_, code := t.broker.Verification()
+	model := trayMenuModel(t.port, code, devices)
 	menu, _, _ := procCreatePopupMenu.Call()
 	if menu == 0 {
 		t.logf("tray menu could not be created")
@@ -337,6 +338,9 @@ func (t *winTray) showMenu() {
 		procAppendMenuW.Call(menu, flags, 0, uintptr(unsafe.Pointer(ptr)))
 	}
 	appendItem(mfString|mfGrayed, model.Status)
+	if model.Code != "" {
+		appendItem(mfString|mfGrayed, model.Code)
+	}
 	appendItem(mfSeparator, "")
 	for _, line := range model.Phones {
 		appendItem(mfString|mfGrayed, line)

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,13 +16,13 @@ import (
 
 func newTestBroker(t *testing.T) *Broker {
 	t.Helper()
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	return NewBroker()
 }
 
 func approvedDevice(t *testing.T, b *Broker, id, ip string) (requestID, token string) {
 	t.Helper()
-	req, err := b.Request(id, "Pixel 8", ip)
+	req, err := b.Request(id, "Pixel 8", ip, "")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
@@ -43,7 +44,7 @@ func approvedDevice(t *testing.T, b *Broker, id, ip string) (requestID, token st
 
 func TestRequestApproveStatusTokenOnce(t *testing.T) {
 	b := newTestBroker(t)
-	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10")
+	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,7 @@ func TestRequestApproveStatusTokenOnce(t *testing.T) {
 func TestKnownReissuesTokenAndSurvivesReload(t *testing.T) {
 	b := newTestBroker(t)
 	_, oldToken := approvedDevice(t, b, "device-1", "192.0.2.10")
-	known, err := b.Request("device-1", "Pixel 8 Pro", "192.0.2.20")
+	known, err := b.Request("device-1", "Pixel 8 Pro", "192.0.2.20", oldToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,21 +146,21 @@ func TestKnownMethodAndRevokePersist(t *testing.T) {
 
 func TestPendingLimitExpiryAndDeny(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	b := NewBrokerWithClock(func() time.Time { return now })
 
 	requestIDs := make([]string, 0, MaxPendingPerIP)
 	for i := 0; i < MaxPendingPerIP; i++ {
-		req, err := b.Request(fmt.Sprintf("device-%d", i), "Phone", "192.0.2.10")
+		req, err := b.Request(fmt.Sprintf("device-%d", i), "Phone", "192.0.2.10", "")
 		if err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
 		requestIDs = append(requestIDs, req.RequestID)
 	}
-	if _, err := b.Request("device-overflow", "Phone", "192.0.2.10"); !errors.Is(err, ErrTooManyPending) {
+	if _, err := b.Request("device-overflow", "Phone", "192.0.2.10", ""); !errors.Is(err, ErrTooManyPending) {
 		t.Fatalf("sixth request error = %v, want ErrTooManyPending", err)
 	}
-	if _, err := b.Request("device-other-ip", "Phone", "192.0.2.11"); err != nil {
+	if _, err := b.Request("device-other-ip", "Phone", "192.0.2.11", ""); err != nil {
 		t.Fatalf("other IP must have an independent limit: %v", err)
 	}
 	if err := b.Deny(requestIDs[1]); err != nil {
@@ -174,7 +175,7 @@ func TestPendingLimitExpiryAndDeny(t *testing.T) {
 	if err := b.Approve(requestIDs[0]); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("approving expired request error = %v, want ErrNotFound", err)
 	}
-	if _, err := b.Request("device-after-expiry", "Phone", "192.0.2.10"); err != nil {
+	if _, err := b.Request("device-after-expiry", "Phone", "192.0.2.10", ""); err != nil {
 		t.Fatalf("expired requests must not count toward the limit: %v", err)
 	}
 	status, err = b.Status(requestIDs[1], "192.0.2.10")
@@ -185,11 +186,11 @@ func TestPendingLimitExpiryAndDeny(t *testing.T) {
 
 func TestApproveLastUsesNewestPending(t *testing.T) {
 	b := newTestBroker(t)
-	first, err := b.Request("device-1", "First", "192.0.2.10")
+	first, err := b.Request("device-1", "First", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := b.Request("device-2", "Second", "192.0.2.10")
+	second, err := b.Request("device-2", "Second", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,11 +205,11 @@ func TestApproveLastUsesNewestPending(t *testing.T) {
 	}
 }
 
-func TestRequestNotificationOnlyForNewDevices(t *testing.T) {
+func TestRequestNotificationSkipsOnlyTokenAuthenticatedRepairs(t *testing.T) {
 	b := newTestBroker(t)
 	notified := make(chan RequestInfo, 2)
 	b.OnRequest(func(req RequestInfo) { notified <- req })
-	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10")
+	req, err := b.Request("device-1", "Pixel 8", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,27 +224,43 @@ func TestRequestNotificationOnlyForNewDevices(t *testing.T) {
 	if err := b.Approve(req.RequestID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Request("device-1", "Pixel 8", "192.0.2.10"); err != nil {
+	status, err := b.Status(req.RequestID, "192.0.2.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Request("device-1", "Pixel 8", "192.0.2.10", status.Token); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case got := <-notified:
-		t.Fatalf("known re-pair triggered notification: %+v", got)
+		t.Fatalf("token-authenticated re-pair triggered notification: %+v", got)
 	default:
+	}
+	repair, err := b.Request("device-1", "Pixel 8", "192.0.2.10", "")
+	if err != nil || repair.RequestID == "" || repair.Token != "" {
+		t.Fatalf("known re-pair without token = %+v, err = %v; want pending", repair, err)
+	}
+	select {
+	case got := <-notified:
+		if got.RequestID != repair.RequestID || got.ID != "device-1" {
+			t.Fatalf("notification = %+v", got)
+		}
+	default:
+		t.Fatal("known re-pair without token did not notify")
 	}
 }
 
 func TestControlSocketCommandsAndTokenPrivacy(t *testing.T) {
 	b := newTestBroker(t)
-	first, err := b.Request("device-1", "First", "192.0.2.10")
+	first, err := b.Request("device-1", "First", "192.0.2.10", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := b.Request("device-2", "Second", "192.0.2.11")
+	second, err := b.Request("device-2", "Second", "192.0.2.11", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLIPBOARD_SHARE_CTL_SOCK", filepath.Join(t.TempDir(), "ctl.sock"))
+	t.Setenv("NUDGE_CTL_SOCK", filepath.Join(t.TempDir(), "ctl.sock"))
 	control, err := ListenControl(b)
 	if err != nil {
 		t.Fatal(err)
@@ -313,10 +330,64 @@ func TestControlSocketCommandsAndTokenPrivacy(t *testing.T) {
 	}
 }
 
+// S5: `list` carries the certificate's verification code and fingerprint so
+// the CLI and the panel can show the code; other commands stay unchanged.
+func TestControlListCarriesTheVerificationCode(t *testing.T) {
+	b := newTestBroker(t)
+	const fp = "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+	b.SetVerification(fp, "6B86-B273-FF34")
+	if gotFP, gotCode := b.Verification(); gotFP != fp || gotCode != "6B86-B273-FF34" {
+		t.Fatalf("Verification() = %q, %q", gotFP, gotCode)
+	}
+	if _, err := b.Request("device-1", "First", "192.0.2.10", ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NUDGE_CTL_SOCK", filepath.Join(t.TempDir(), "ctl.sock"))
+	control, err := ListenControl(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { control.Close() })
+	send := func(cmd string) map[string]any {
+		t.Helper()
+		conn, err := net.Dial("unix", ControlPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if _, err := fmt.Fprintln(conn, cmd); err != nil {
+			t.Fatal(err)
+		}
+		line, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response map[string]any
+		if err := json.Unmarshal([]byte(line), &response); err != nil {
+			t.Fatalf("invalid socket response %q: %v", line, err)
+		}
+		return response
+	}
+
+	list := send(`{"cmd":"list"}`)
+	if list["ok"] != true || list["code"] != "6B86-B273-FF34" || list["fingerprint"] != fp ||
+		len(list["requests"].([]any)) != 1 || len(list["devices"].([]any)) != 0 {
+		t.Fatalf("list = %#v", list)
+	}
+	approved := send(`{"cmd":"approve-last"}`)
+	if want := map[string]any{"ok": true, "message": "Approved newest pair request.", "requests": nil, "devices": nil}; !reflect.DeepEqual(approved, want) {
+		t.Fatalf("approve-last = %#v, want %#v", approved, want)
+	}
+	unknown := send(`{"cmd":"bogus"}`)
+	if want := map[string]any{"ok": false, "error": `unknown command "bogus"`, "requests": nil, "devices": nil}; !reflect.DeepEqual(unknown, want) {
+		t.Fatalf("unknown = %#v, want %#v", unknown, want)
+	}
+}
+
 func TestListenControlRemovesStaleSocket(t *testing.T) {
 	b := newTestBroker(t)
 	path := filepath.Join(t.TempDir(), "ctl.sock")
-	t.Setenv("CLIPBOARD_SHARE_CTL_SOCK", path)
+	t.Setenv("NUDGE_CTL_SOCK", path)
 	stale, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
 
 /**
@@ -23,10 +24,18 @@ class InputClient(
         .pingInterval(20, TimeUnit.SECONDS)
         .build(),
 ) {
+    companion object {
+        /** onDisconnected reason when the PC presented a certificate other than the pin. */
+        const val PIN_MISMATCH = "pin_mismatch"
+    }
+
     interface Listener {
         fun onConnected()
 
-        /** reason is "unauthorized" when the server rejected the session token. */
+        /**
+         * reason is "unauthorized" when the server rejected the session token and
+         * [PIN_MISMATCH] when the PC's certificate is not the pinned one.
+         */
         fun onDisconnected(reason: String?)
 
         /** A single event was rejected by the server (connection stays open). */
@@ -39,16 +48,18 @@ class InputClient(
     val connected: Boolean
         get() = ws != null
 
-    fun connect(serverHttpUrl: String, token: String, listener: Listener) {
+    /** Opens the wss socket, accepting only the certificate whose fingerprint is [pin]. */
+    fun connect(serverUrl: String, token: String, pin: String, listener: Listener) {
         if (ws != null) return
-        val wsUrl = serverHttpUrl.replaceFirst("http", "ws") + "/ws/input?token=" + token
+        val pinned = PinnedTls.client(http, pin)
+        val wsUrl = HostAddress.webSocketUrl(serverUrl, "/ws/input") + "?token=" + token
         val request = try {
             Request.Builder().url(wsUrl).build()
         } catch (e: IllegalArgumentException) {
             listener.onDisconnected(e.message)
             return
         }
-        ws = http.newWebSocket(request, object : WebSocketListener() {
+        ws = pinned.http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 listener.onConnected()
             }
@@ -70,7 +81,11 @@ class InputClient(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 ws = null
                 listener.onDisconnected(
-                    if (response?.code == 401) "unauthorized" else t.message
+                    when {
+                        pinned.isMismatch(t) -> PIN_MISMATCH
+                        response?.code == 401 -> "unauthorized"
+                        else -> t.message
+                    }
                 )
             }
         })
@@ -117,13 +132,22 @@ class InputClient(
     private fun clampNotches(v: Int): Int = v.coerceIn(-100, 100)
 }
 
-/** Device-identity pairing requests and approval polling (S3/S5). */
+/**
+ * Device-identity pairing requests and approval polling (S3/S5), over TLS (S6).
+ * [request] runs against the stored pin, or in pairing mode captures the certificate
+ * the PC presents; [status] is then bound to exactly that certificate's fingerprint.
+ */
 object PairingClient {
+    /** [fingerprint] is the certificate that answered: the pin to store on approval. */
     sealed class RequestResult {
-        data class Approved(val token: String) : RequestResult()
-        data class Pending(val requestId: String) : RequestResult()
+        data class Approved(val token: String, val fingerprint: String) : RequestResult()
+        data class Pending(val requestId: String, val fingerprint: String) : RequestResult()
         object TooManyRequests : RequestResult()
+        object PinMismatch : RequestResult()
         object Failed : RequestResult()
+
+        /** The PC answered with another `protocol` (null: none); nothing may be stored (#12). */
+        data class Incompatible(val serverProtocol: Int?) : RequestResult()
     }
 
     sealed class StatusResult {
@@ -131,6 +155,7 @@ object PairingClient {
         data class Approved(val token: String) : StatusResult()
         object Denied : StatusResult()
         object Expired : StatusResult()
+        object PinMismatch : StatusResult()
         object Failed : StatusResult()
     }
 
@@ -139,36 +164,63 @@ object PairingClient {
             .readTimeout(5, TimeUnit.SECONDS).build()
     }
 
-    fun request(serverHttpUrl: String, deviceId: String, deviceName: String): RequestResult {
+    /**
+     * Asks the PC for access. With a [pin] (a known PC renewing its token) only that
+     * certificate is accepted and the stored [token], if any, is sent as
+     * `Authorization: Bearer` so the PC renews it without approval (#21); with no pin,
+     * the presented certificate is captured and no token is sent.
+     */
+    fun request(
+        serverUrl: String,
+        pin: String?,
+        token: String?,
+        deviceId: String,
+        deviceName: String,
+    ): RequestResult {
         val body = JSONObject().put("id", deviceId).put("name", deviceName).toString()
             .toRequestBody("application/json".toMediaType())
+        // A fresh SSLContext per request: the handshake is always checked, never resumed.
+        val pinned = PinnedTls.client(http, pin)
         return try {
-            val request = Request.Builder().url("$serverHttpUrl/pair/request").post(body).build()
-            http.newCall(request).execute().use { resp ->
+            val builder = Request.Builder().url("$serverUrl/pair/request").post(body)
+            PairingAuth.requestHeaderValue(token, pin)?.let { builder.header(ClipboardAuth.HEADER_NAME, it) }
+            val request = builder.build()
+            pinned.http.newCall(request).execute().use { resp ->
+                val seen = seenFingerprint(resp, pinned) ?: return@use RequestResult.Failed
                 when (resp.code) {
-                    200 -> {
-                        val token = JSONObject(resp.body?.string() ?: "").optString("token")
-                        if (token.isNotEmpty()) RequestResult.Approved(token) else RequestResult.Failed
-                    }
-                    202 -> {
-                        val id = JSONObject(resp.body?.string() ?: "").optString("requestId")
-                        if (id.isNotEmpty()) RequestResult.Pending(id) else RequestResult.Failed
+                    200, 202 -> {
+                        val json = JSONObject(resp.body?.string() ?: "")
+                        // Checked before the token or request id is used: an incompatible PC
+                        // is never paired with (#12).
+                        val protocol = ProtocolCompat.protocolOf(json.opt("protocol"))
+                        if (ProtocolCompat.check(protocol) != ProtocolCompat.Result.COMPATIBLE) {
+                            return@use RequestResult.Incompatible(protocol)
+                        }
+                        if (resp.code == 200) {
+                            val token = json.optString("token")
+                            if (token.isNotEmpty()) RequestResult.Approved(token, seen) else RequestResult.Failed
+                        } else {
+                            val id = json.optString("requestId")
+                            if (id.isNotEmpty()) RequestResult.Pending(id, seen) else RequestResult.Failed
+                        }
                     }
                     429 -> RequestResult.TooManyRequests
                     else -> RequestResult.Failed
                 }
             }
         } catch (e: Exception) {
-            RequestResult.Failed
+            if (pinned.isMismatch(e)) RequestResult.PinMismatch else RequestResult.Failed
         }
     }
 
-    fun status(serverHttpUrl: String, requestId: String): StatusResult {
+    /** Polls the approval, accepting only the certificate [request] saw ([fingerprint]). */
+    fun status(serverUrl: String, requestId: String, fingerprint: String): StatusResult {
+        val pinned = PinnedTls.client(http, fingerprint)
         return try {
-            val url = "$serverHttpUrl/pair/status".toHttpUrl().newBuilder()
+            val url = "$serverUrl/pair/status".toHttpUrl().newBuilder()
                 .addQueryParameter("id", requestId).build()
             val request = Request.Builder().url(url).get().build()
-            http.newCall(request).execute().use { resp ->
+            pinned.http.newCall(request).execute().use { resp ->
                 // The server answers an expired request with HTTP 410 and
                 // {"state":"expired"}; both spellings map to Expired so the
                 // UI can ask the user to tap Conectar again.
@@ -188,7 +240,18 @@ object PairingClient {
                 }
             }
         } catch (e: Exception) {
-            StatusResult.Failed
+            if (pinned.isMismatch(e)) StatusResult.PinMismatch else StatusResult.Failed
         }
+    }
+
+    /** Fingerprint of the certificate that served [resp]; the trust manager saw the same one. */
+    private fun seenFingerprint(resp: Response, pinned: PinnedClient): String? {
+        val leaf = resp.handshake?.peerCertificates?.firstOrNull() as? X509Certificate
+        val seen = leaf?.let(CertPin::fingerprint) ?: pinned.trustManager.seenFingerprint
+        // A pinned request can only have been answered by the pinned certificate.
+        if (seen == null || CertPin.decide(pinned.trustManager.pin, seen) == CertPin.Decision.MISMATCH) {
+            return null
+        }
+        return seen
     }
 }

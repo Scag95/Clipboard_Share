@@ -3,14 +3,14 @@ package main
 import (
 	"bytes"
 	"errors"
-	"fmt"
-	"os"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
+	"nudge/internal/input"
 	"nudge/internal/pair"
 )
 
@@ -32,28 +32,23 @@ func TestInstanceNameFallsBackToNudge(t *testing.T) {
 	}
 }
 
-func TestServerPortPrefersNudgeAndFallsBack(t *testing.T) {
+func TestServerPortReadsNudgePort(t *testing.T) {
 	t.Setenv("NUDGE_PORT", "")
-	t.Setenv("CLIPBOARD_SHARE_PORT", "")
 	if got := serverPort(); got != "8765" {
 		t.Fatalf("default port = %q, want 8765", got)
 	}
-	t.Setenv("CLIPBOARD_SHARE_PORT", "9000")
-	if got := serverPort(); got != "9000" {
-		t.Fatalf("old name only = %q, want 9000", got)
-	}
 	t.Setenv("NUDGE_PORT", "9100")
 	if got := serverPort(); got != "9100" {
-		t.Fatalf("both names = %q, want 9100", got)
+		t.Fatalf("NUDGE_PORT = %q, want 9100", got)
 	}
 }
 
 func TestPairNotificationUsesNudge(t *testing.T) {
-	title, body := pairNotification("Pixel 8")
+	title, body := pairNotification("Pixel 8", "6B86-B273-FF34")
 	if title != "Nudge" {
 		t.Fatalf("title = %q, want Nudge", title)
 	}
-	if want := "Pair request from Pixel 8 — nudge pair --last"; body != want {
+	if want := "Pair request from Pixel 8, code 6B86-B273-FF34 — nudge pair --last"; body != want {
 		t.Fatalf("body = %q, want %q", body, want)
 	}
 }
@@ -88,84 +83,6 @@ func TestPairClientUnreachableServerMessage(t *testing.T) {
 	}
 }
 
-func legacyOnlyHome(t *testing.T) (home, oldDir string) {
-	t.Helper()
-	if runtime.GOOS != "linux" {
-		t.Skip("the legacy clipboard-share config only exists on Linux")
-	}
-	home = t.TempDir()
-	t.Setenv("HOME", home)
-	for _, name := range []string{"NUDGE_STATE", "CLIPBOARD_SHARE_STATE", "NUDGE_CTL_SOCK", "CLIPBOARD_SHARE_CTL_SOCK"} {
-		t.Setenv(name, "")
-	}
-	oldDir = filepath.Join(home, ".config", "clipboard-share")
-	if err := os.MkdirAll(oldDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(oldDir, "state.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return home, oldDir
-}
-
-// The CLI never migrates: it reaches the socket of the effective (legacy)
-// dir, so a not-yet-migrated or still-running old server stays reachable.
-func TestPairClientDoesNotMigrateAndUsesLegacySocket(t *testing.T) {
-	home, oldDir := legacyOnlyHome(t)
-	var stdout, stderr bytes.Buffer
-	if code := runPairClient([]string{"list"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("exit code = %d, want 1 (no server)", code)
-	}
-	data, err := os.ReadFile(filepath.Join(oldDir, "state.json"))
-	if err != nil || string(data) != "{}" {
-		t.Fatalf("legacy state = %q, err = %v; want untouched", data, err)
-	}
-	newDir := filepath.Join(home, ".config", "nudge")
-	if _, err := os.Lstat(newDir); !os.IsNotExist(err) {
-		t.Fatalf("%s exists (err=%v), want missing", newDir, err)
-	}
-	if got := pair.EffectiveConfigDir(); got != oldDir {
-		t.Fatalf("EffectiveConfigDir() = %q, want %q", got, oldDir)
-	}
-	want := "nudge pair: cannot connect to server at " + filepath.Join(oldDir, "ctl.sock") + ": "
-	if !strings.HasPrefix(stderr.String(), want) {
-		t.Fatalf("stderr = %q, want prefix %q", stderr.String(), want)
-	}
-}
-
-func TestServerMigrateConfigMovesLegacyDir(t *testing.T) {
-	home, oldDir := legacyOnlyHome(t)
-	var logs []string
-	migrateConfig(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) })
-	newDir := filepath.Join(home, ".config", "nudge")
-	data, err := os.ReadFile(filepath.Join(newDir, "state.json"))
-	if err != nil || string(data) != "{}" {
-		t.Fatalf("migrated state = %q, err = %v", data, err)
-	}
-	if _, err := os.Lstat(oldDir); !os.IsNotExist(err) {
-		t.Fatalf("old dir still present: %v", err)
-	}
-	if want := "nudge: moved " + oldDir + " to " + newDir + "\n"; len(logs) != 1 || logs[0] != want {
-		t.Fatalf("logs = %q, want [%q]", logs, want)
-	}
-}
-
-func TestServerMigrateConfigSkipsStateOverrideInLegacyDir(t *testing.T) {
-	home, oldDir := legacyOnlyHome(t)
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(oldDir, "state.json"))
-	var logs []string
-	migrateConfig(func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) })
-	if _, err := os.Stat(filepath.Join(oldDir, "state.json")); err != nil {
-		t.Fatalf("legacy state moved: %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(home, ".config", "nudge")); !os.IsNotExist(err) {
-		t.Fatalf("new dir created: %v", err)
-	}
-	if len(logs) != 1 || !strings.HasPrefix(logs[0], "nudge: config migration skipped, "+oldDir+" left untouched: ") {
-		t.Fatalf("logs = %q", logs)
-	}
-}
-
 // Existing CLI parsing is unchanged by the rename.
 func TestPairClientCommandUnchanged(t *testing.T) {
 	cases := map[string]map[string]string{
@@ -182,5 +99,53 @@ func TestPairClientCommandUnchanged(t *testing.T) {
 	}
 	if _, err := pairClientCommand([]string{"deny", "--request"}); err == nil {
 		t.Error("incomplete deny accepted")
+	}
+}
+
+// S5: `nudge pair list` shows the verification code first, then the lists
+// exactly as before.
+func TestPairListPrintsTheVerificationCodeFirst(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("NUDGE_STATE", filepath.Join(dir, "state.json"))
+	t.Setenv("NUDGE_CTL_SOCK", filepath.Join(dir, "ctl.sock"))
+	b := pair.NewBroker()
+	b.SetVerification("6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b", "6B86-B273-FF34")
+	control, err := pair.ListenControl(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { control.Close() })
+
+	var stdout, stderr bytes.Buffer
+	if code := runPairClient([]string{"list"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code = %d, stderr %q", code, stderr.String())
+	}
+	want := "Verification code: 6B86-B273-FF34\nPending requests:\n  (none)\nApproved devices:\n  (none)\n"
+	if stdout.String() != want || stderr.Len() != 0 {
+		t.Fatalf("stdout = %q, stderr = %q; want %q", stdout.String(), stderr.String(), want)
+	}
+
+	// Other commands print only their message, as before.
+	stdout.Reset()
+	if code := runPairClient([]string{"--last"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("--last with nothing pending: exit %d, want 1", code)
+	}
+	if stdout.Len() != 0 || stderr.String() != "nudge pair: "+pair.ErrNotFound.Error()+"\n" {
+		t.Fatalf("--last stdout = %q, stderr = %q", stdout.String(), stderr.String())
+	}
+}
+
+// S2: the server version string is 1.0.0 and /health serves it next to the
+// protocol version.
+func TestHealthReportsServerVersion(t *testing.T) {
+	if Version != "1.0.0" {
+		t.Fatalf("Version = %q, want 1.0.0", Version)
+	}
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	rec := httptest.NewRecorder()
+	newRouter(pair.NewBroker(), &input.Recorder{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if want := `{"status":"ok","protocol":1,"version":"1.0.0"}` + "\n"; rec.Code != http.StatusOK || rec.Body.String() != want {
+		t.Fatalf("/health = %d %q, want 200 %q", rec.Code, rec.Body.String(), want)
 	}
 }

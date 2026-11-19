@@ -17,6 +17,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +25,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 /**
  * Remote mouse, keyboard, and clipboard for the host selected on the home screen.
@@ -33,7 +36,7 @@ import kotlinx.coroutines.withContext
 class RemoteControlActivity : AppCompatActivity() {
 
     private companion object {
-        const val TAG = "ClipboardShareRemote"
+        const val TAG = "NudgeRemote"
         const val TYPED_CARD_VISIBLE_MS = 3_000L
     }
 
@@ -45,6 +48,9 @@ class RemoteControlActivity : AppCompatActivity() {
     private lateinit var hostKey: String
     @Volatile private var manualDisconnect = false
     private var pairingJob: Job? = null
+
+    /** The /health protocol probe that runs before the WebSocket opens (#12). */
+    private var connectJob: Job? = null
 
     private lateinit var statusText: TextView
     private lateinit var clipboardStatusText: TextView
@@ -86,6 +92,9 @@ class RemoteControlActivity : AppCompatActivity() {
             runOnUiThread {
                 if (manualDisconnect) {
                     showConnect("Desconectado (a mano)")
+                } else if (reason == InputClient.PIN_MISMATCH) {
+                    authRetryInFlight = false
+                    onPinMismatch()
                 } else if (reason == "unauthorized") {
                     if (authRetryInFlight) {
                         // The replacement token was also rejected: require an explicit request.
@@ -193,6 +202,8 @@ class RemoteControlActivity : AppCompatActivity() {
             manualDisconnect = true
             pairingJob?.cancel()
             pairingJob = null
+            connectJob?.cancel()
+            connectJob = null
             handler.removeCallbacksAndMessages(null)
             retryScheduled = false
             client.disconnect()
@@ -207,7 +218,9 @@ class RemoteControlActivity : AppCompatActivity() {
         super.onResume()
         clipboardStatusHandler.removeCallbacks(clipboardStatusPoller)
         clipboardStatusHandler.post(clipboardStatusPoller)
-        if (!::store.isInitialized || client.connected || pairingJob?.isActive == true) return
+        if (!::store.isInitialized || client.connected || pairingJob?.isActive == true ||
+            connectJob?.isActive == true
+        ) return
         manualDisconnect = false
         if (store.getToken(hostKey) != null) {
             connect()
@@ -313,15 +326,32 @@ class RemoteControlActivity : AppCompatActivity() {
     private fun connect(isAuthRetry: Boolean = false) {
         manualDisconnect = false
         authRetryInFlight = isAuthRetry
+        // getToken already dropped a token without a pin; a pin is read right after it.
         val token = store.getToken(hostKey)
-        if (token == null) {
+        val pin = store.getPin(hostKey)
+        if (token == null || pin == null) {
             showConnect("Dispositivo: ${store.deviceName}. Toca Conectar para solicitar acceso")
             return
         }
-        if (client.connected) return
+        if (client.connected || connectJob?.isActive == true) return
         hidePairingControls()
         setStatus("Conectando ${store.deviceName}…")
-        client.connect(serverUrl, token, wsListener)
+        // Check the PC's protocol first, over the pinned certificate and without the token;
+        // an unreachable PC (or another certificate) goes on as before and the socket reports it.
+        connectJob = lifecycleScope.launch {
+            val probe = withContext(Dispatchers.IO) {
+                HealthCheck.probe(PinnedTls.client(HealthCheck.baseClient, pin).http, serverUrl)
+            }
+            val incompatible = ProtocolCompat.blockingMessage(probe)
+            if (incompatible != null) {
+                // Neither connect nor renew: the PC speaks another protocol. The token stays.
+                authRetryInFlight = false
+                showConnect(incompatible)
+                return@launch
+            }
+            if (manualDisconnect || client.connected) return@launch
+            client.connect(serverUrl, token, pin, wsListener)
+        }
     }
 
     private fun scheduleRetry() {
@@ -340,6 +370,8 @@ class RemoteControlActivity : AppCompatActivity() {
     private fun requestPairing(automatic: Boolean) {
         manualDisconnect = false
         pairingJob?.cancel()
+        connectJob?.cancel()
+        connectJob = null
         handler.removeCallbacksAndMessages(null)
         retryScheduled = false
         hidePairingControls()
@@ -347,24 +379,50 @@ class RemoteControlActivity : AppCompatActivity() {
             if (automatic) "Renovando acceso para ${store.deviceName}…"
             else "Solicitando acceso para ${store.deviceName}…"
         )
+        // A paired PC is only reached through its pin; a new pairing trusts the certificate
+        // it is shown and binds the approval polls to it (S6). The current token goes along
+        // only with the pin, so the PC renews it without approval (#21).
+        val pin = store.getPin(hostKey)
+        val token = store.getToken(hostKey)
         pairingJob = lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
-                PairingClient.request(serverUrl, store.deviceId, store.deviceName)
+                PairingClient.request(serverUrl, pin, token, store.deviceId, store.deviceName)
             }
             when (result) {
                 is PairingClient.RequestResult.Approved -> {
-                    store.putToken(hostKey, result.token)
+                    // An immediate token skips the PC's approval dialog. Without a pin (no token
+                    // was sent, so only an older server answers like this) the user confirms
+                    // the code before it is pinned (S8).
+                    if (CertPin.needsConfirmation(pin, immediateToken = true) &&
+                        !confirmCode(result.fingerprint)
+                    ) {
+                        showConnect(CertPin.CONFIRM_REJECTED_STATUS)
+                        return@launch
+                    }
+                    store.putSession(hostKey, result.token, result.fingerprint)
+                    // The clipboard sync idles without a token: start it now that there is one.
+                    ClipboardSyncService.ensureStarted(this@RemoteControlActivity)
                     connect(isAuthRetry = automatic)
                 }
                 is PairingClient.RequestResult.Pending -> {
                     store.clearToken(hostKey)
                     connectButton.visibility = View.GONE
                     cancelPairingButton.visibility = View.VISIBLE
-                    setStatus("Esperando aprobación en el PC para ${store.deviceName}…")
-                    pollPairingStatus(serverUrl, result.requestId, automatic)
+                    setStatus(
+                        "Esperando aprobación en el PC para ${store.deviceName}…\n" +
+                            CertPin.waitingCodeText(result.fingerprint)
+                    )
+                    // The fingerprint lives only in this job: deny, expiry or cancel drop it.
+                    pollPairingStatus(serverUrl, result.requestId, result.fingerprint, automatic)
                 }
+                PairingClient.RequestResult.PinMismatch -> onPinMismatch()
                 PairingClient.RequestResult.TooManyRequests -> showConnect(
                     "Hay demasiadas solicitudes pendientes. Espera y vuelve a intentar"
+                )
+                // Neither pair nor connect: the PC speaks another protocol (#12).
+                is PairingClient.RequestResult.Incompatible -> showConnect(
+                    ProtocolCompat.message(result.serverProtocol)
+                        ?: "No se pudo solicitar acceso. Verifica el servidor y reintenta"
                 )
                 PairingClient.RequestResult.Failed -> showConnect(
                     if (automatic) "No se pudo renovar la sesión. Toca Conectar para reintentar"
@@ -374,18 +432,44 @@ class RemoteControlActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun pollPairingStatus(url: String, requestId: String, automatic: Boolean) {
+    /**
+     * Asks whether the PC shows the code of [fingerprint]; true only for "Sí, coincide".
+     * "No" and any dismissal answer false. Cancelling the job (cancel, a new request or
+     * the activity being destroyed) dismisses the dialog, so it never outlives the window.
+     */
+    private suspend fun confirmCode(fingerprint: String): Boolean =
+        suspendCancellableCoroutine { cont ->
+            val dialog = AlertDialog.Builder(this)
+                .setTitle(CertPin.CONFIRM_TITLE)
+                .setMessage(CertPin.confirmMessage(fingerprint))
+                .setPositiveButton(CertPin.CONFIRM_YES) { _, _ -> if (cont.isActive) cont.resume(true) }
+                .setNegativeButton(CertPin.CONFIRM_NO) { _, _ -> if (cont.isActive) cont.resume(false) }
+                .create()
+            dialog.setOnDismissListener { if (cont.isActive) cont.resume(false) }
+            cont.invokeOnCancellation { runOnUiThread { dialog.dismiss() } }
+            dialog.show()
+        }
+
+    /** Polls with only the certificate /pair/request saw; its pin is stored on approval. */
+    private suspend fun pollPairingStatus(
+        url: String,
+        requestId: String,
+        fingerprint: String,
+        automatic: Boolean,
+    ) {
         while (lifecycleScope.coroutineContext.isActive) {
             delay(1_500L)
             when (
                 val result = withContext(Dispatchers.IO) {
-                    PairingClient.status(url, requestId)
+                    PairingClient.status(url, requestId, fingerprint)
                 }
             ) {
                 PairingClient.StatusResult.Pending -> Unit
                 is PairingClient.StatusResult.Approved -> {
                     // Status returns the token once, so persist it before opening the socket.
-                    store.putToken(hostKey, result.token)
+                    store.putSession(hostKey, result.token, fingerprint)
+                    // The clipboard sync idles without a token: start it now that there is one.
+                    ClipboardSyncService.ensureStarted(this@RemoteControlActivity)
                     connect(isAuthRetry = automatic)
                     return
                 }
@@ -399,12 +483,27 @@ class RemoteControlActivity : AppCompatActivity() {
                     showConnect("La solicitud expiró. Toca Conectar para reintentar")
                     return
                 }
+                PairingClient.StatusResult.PinMismatch -> {
+                    onPinMismatch()
+                    return
+                }
                 PairingClient.StatusResult.Failed -> {
                     showConnect("No se pudo consultar la aprobación. Toca Conectar para reintentar")
                     return
                 }
             }
         }
+    }
+
+    /**
+     * The PC presented a certificate other than the pinned one: forget its token and pin,
+     * stop the clipboard sync with the same message, and wait for an explicit new pairing.
+     */
+    private fun onPinMismatch() {
+        Log.w(TAG, "Certificate of $hostKey does not match its pin: pairing required")
+        store.clearToken(hostKey)
+        ClipboardSyncService.reportPinMismatch(this, hostKey)
+        showConnect(CertPin.MISMATCH_STATUS)
     }
 
     private fun cancelPairing() {

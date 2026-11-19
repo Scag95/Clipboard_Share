@@ -53,7 +53,11 @@ clic deliberado en el botón.
 
 Desde el panel podés:
 
-- **Aprobar / Rechazar** cada solicitud (caducan a los 90 s).
+- **Aprobar / Rechazar** cada solicitud (caducan a los 90 s). Arriba de las
+  solicitudes se ve el código de verificación de la PC
+  (`Verification code: XXXX-XXXX-XXXX`): aprobá solo si el teléfono muestra
+  el mismo. El código está siempre visible mientras el servidor corre,
+  también sin solicitudes pendientes.
 - **Revocar** un dispositivo emparejado (pide confirmación).
 - Ver el estado del servidor. Si no corre, el panel lo dice y sugiere
   `systemctl --user start nudge`.
@@ -82,8 +86,7 @@ interruptor. Si un cambio falla, la tarjeta muestra el motivo.
 
 El servidor escucha en `:8765` y se anuncia en la red local por mDNS como
 `_nudge._tcp`. Para cambiar el puerto, ejecutá `systemctl --user edit nudge` y
-definí `Environment=NUDGE_PORT=...`. Los nombres viejos `CLIPBOARD_SHARE_*`
-(por ejemplo `CLIPBOARD_SHARE_PORT`) siguen valiendo como respaldo.
+definí `Environment=NUDGE_PORT=...`.
 
 ## Permisos de /dev/uinput
 
@@ -108,16 +111,29 @@ el acceso venía del grupo `input`.
 
 1. En el teléfono, elegí el PC en la lista de inicio. Se abre el trackpad y,
    si es la primera vez, la app pide el emparejamiento.
-2. En el PC aparece una notificación y el panel muestra la solicitud: tocá
-   **Aprobar**.
-3. Listo. Las reconexiones siguientes son automáticas, también después de
+2. En el PC aparece una notificación (con el código de verificación) y el
+   panel muestra la solicitud.
+3. Compará el código: el teléfono muestra uno como `4F2A-91C7-0B3E` y el
+   panel (o `nudge pair list`, en su primera línea) tiene que mostrar el
+   mismo. Si coinciden, tocá **Aprobar**; si no, **Rechazar**.
+4. Listo. Las reconexiones siguientes son automáticas, también después de
    reiniciar el servidor o el PC.
+
+Un teléfono que el PC ya conocía solo se reconecta sin aprobación si
+presenta su token vigente por la conexión cifrada; si no lo tiene (por
+ejemplo, después del aviso "El certificado de la PC cambió"), la solicitud
+vuelve a aparecer en el panel con el código, como la de un teléfono nuevo.
+Si un PC con una versión anterior de Nudge igual le da acceso sin pedir
+aprobación, es el teléfono el que pregunta "¿La PC muestra el código …?":
+miralo en el panel o con `nudge pair list` y tocá **Sí, coincide** solo si
+es el mismo. Con **No** el teléfono no guarda nada y cancela el
+emparejamiento.
 
 El CLI sirve para lo mismo y es cómodo para scripts:
 
 ```bash
 nudge pair --last                 # aprueba el request más nuevo
-nudge pair list                   # ver pendientes y aprobados
+nudge pair list                   # código de verificación, pendientes y aprobados
 nudge pair revoke --device <id>   # quitar un dispositivo
 ```
 
@@ -132,26 +148,11 @@ Si perdés un teléfono, usá **Revocar** en el panel (o
 `nudge pair revoke --device <id>`). Para resetear todo el emparejamiento,
 borrá `~/.config/nudge/state.json`.
 
-## Migración desde clipboard-share
-
-Nudge antes se llamaba Clipboard Share. El paquete `nudge` reemplaza a
-`clipboard-share` (`replaces`/`conflicts`/`provides`). Antes de actualizar,
-apagá el servicio viejo:
-
-```bash
-systemctl --user disable --now clipboard-share
-```
-
-Al primer arranque, el **servidor** mueve `~/.config/clipboard-share` a
-`~/.config/nudge` (si este último no existe todavía), así los teléfonos
-emparejados siguen funcionando. Un `~/.config/nudge` existente nunca se
-sobrescribe. El CLI y el panel no mueven nada: usan `~/.config/nudge` si
-existe y, si no, el directorio viejo. Si el servidor no puede moverlo, sigue
-trabajando con el directorio viejo y no se pierde ningún emparejamiento.
-
-Durante la transición el servidor anuncia el servicio mDNS nuevo
-(`_nudge._tcp`) y el viejo (`_clipboard-share._tcp`), y la app de Android
-busca los dos.
+El tráfico con el teléfono va cifrado (HTTPS/WSS) con un certificado
+autofirmado que el servidor guarda en `~/.config/nudge/tls.crt` y
+`~/.config/nudge/tls.key`. El teléfono recuerda ese certificado al emparejar.
+Si borrás `tls.key` (o todo `~/.config/nudge`), el servidor genera otro y
+**cada teléfono tiene que emparejarse de nuevo**.
 
 ## Probar el panel sin el paquete
 

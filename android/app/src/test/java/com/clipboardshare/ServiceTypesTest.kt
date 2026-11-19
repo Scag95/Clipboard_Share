@@ -7,16 +7,14 @@ import org.junit.Test
 
 class ServiceTypesTest {
     @Test
-    fun browsesNudgeFirstThenLegacy() {
-        assertEquals(listOf("_nudge._tcp.", "_clipboard-share._tcp."), ServiceTypes.ALL)
+    fun browsesOnlyNudge() {
+        assertEquals(listOf("_nudge._tcp."), ServiceTypes.ALL)
     }
 
     @Test
-    fun acceptsEitherTypeWithOrWithoutTrailingDot() {
+    fun acceptsNudgeWithOrWithoutTrailingDot() {
         assertTrue(ServiceTypes.isKnown("_nudge._tcp."))
         assertTrue(ServiceTypes.isKnown("_nudge._tcp"))
-        assertTrue(ServiceTypes.isKnown("_clipboard-share._tcp."))
-        assertTrue(ServiceTypes.isKnown("_clipboard-share._tcp"))
     }
 
     @Test

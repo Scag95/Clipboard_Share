@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ type pairingClient struct {
 
 func newPairingClient(t *testing.T) (*httptest.Server, *pair.Broker) {
 	t.Helper()
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	return newPairingClientWithBroker(t, pair.NewBroker())
 }
 
@@ -62,6 +63,45 @@ func postPairRequest(t *testing.T, url, body string) *http.Response {
 	return resp
 }
 
+// postPairRequestAuth posts /pair/request with the given Authorization header
+// value (no header when auth is empty).
+func postPairRequestAuth(t *testing.T, url, body, auth string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url+"/pair/request", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+// pairApprovedOverHTTP pairs id through /pair/request + approval +
+// /pair/status and returns the issued token.
+func pairApprovedOverHTTP(t *testing.T, url string, b *pair.Broker, id, name string) string {
+	t.Helper()
+	resp := postPairRequest(t, url, `{"id":"`+id+`","name":"`+name+`"}`)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("initial %s status = %d, want 202", id, resp.StatusCode)
+	}
+	requestID, _ := decodePairResponse(t, resp)
+	if err := b.Approve(requestID); err != nil {
+		t.Fatal(err)
+	}
+	status, statusResp := getPairStatus(t, url, requestID)
+	if statusResp.StatusCode != http.StatusOK || status.Token == "" {
+		t.Fatalf("approved %s status = %+v, HTTP %d", id, status, statusResp.StatusCode)
+	}
+	return status.Token
+}
+
 func decodePairResponse(t *testing.T, resp *http.Response) (requestID, token string) {
 	t.Helper()
 	var out struct {
@@ -88,31 +128,130 @@ func getPairStatus(t *testing.T, url, requestID string) (pair.StatusResult, *htt
 	return out, resp
 }
 
-func TestPairKnownDeviceGetsImmediateRotatedToken(t *testing.T) {
+// S2: a known device presenting its own current token gets a rotated token
+// at once; the old token stops validating and the PC is not asked.
+func TestPairKnownDeviceWithCurrentTokenGetsImmediateRotatedToken(t *testing.T) {
 	s, b := newPairingClient(t)
-	resp := postPairRequest(t, s.URL, `{"id":"device-1","name":"Pixel 8"}`)
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("initial status = %d, want 202", resp.StatusCode)
-	}
-	requestID, _ := decodePairResponse(t, resp)
-	if err := b.Approve(requestID); err != nil {
-		t.Fatal(err)
-	}
-	status, statusResp := getPairStatus(t, s.URL, requestID)
-	if statusResp.StatusCode != http.StatusOK || status.Token == "" {
-		t.Fatalf("approved status = %+v, HTTP %d", status, statusResp.StatusCode)
-	}
+	oldToken := pairApprovedOverHTTP(t, s.URL, b, "device-1", "Pixel 8")
+	notified := make(chan pair.RequestInfo, 1)
+	b.OnRequest(func(req pair.RequestInfo) { notified <- req })
 
-	resp = postPairRequest(t, s.URL, `{"id":"device-1","name":"Pixel 8"}`)
+	resp := postPairRequestAuth(t, s.URL, `{"id":"device-1","name":"Pixel 8"}`, "Bearer "+oldToken)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("known status = %d, want 200", resp.StatusCode)
 	}
 	knownRequestID, newToken := decodePairResponse(t, resp)
-	if knownRequestID != "" || newToken == "" || newToken == status.Token {
+	if knownRequestID != "" || newToken == "" || newToken == oldToken {
 		t.Fatalf("known response requestId=%q token=%q", knownRequestID, newToken)
 	}
-	if b.Validate(status.Token) || !b.Validate(newToken) {
+	if b.Validate(oldToken) || !b.Validate(newToken) {
 		t.Fatal("known re-pair did not rotate the device token")
+	}
+	if devices, requests := b.Snapshot(); len(devices) != 1 || len(requests) != 0 {
+		t.Fatalf("snapshot devices=%+v requests=%+v; want one device, no pending", devices, requests)
+	}
+	select {
+	case got := <-notified:
+		t.Fatalf("token-authenticated re-pair asked the PC: %+v", got)
+	default:
+	}
+}
+
+// S2: a known device id without its own current token is treated like a new
+// phone: 202 pending, no token, the old token keeps working until approval,
+// the PC is notified, and approval updates the same device entry.
+func TestPairKnownDeviceWithoutItsTokenIsPendingUntilApproved(t *testing.T) {
+	cases := []struct {
+		name string
+		auth func(own, other string) string
+	}{
+		{"no header", func(own, other string) string { return "" }},
+		{"scheme only", func(own, other string) string { return "Bearer" }},
+		{"wrong scheme", func(own, other string) string { return "Basic " + own }},
+		{"double space", func(own, other string) string { return "Bearer  " + own }},
+		{"wrong token", func(own, other string) string { return "Bearer " + strings.Repeat("0", 64) }},
+		{"another device's valid token", func(own, other string) string { return "Bearer " + other }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, b := newPairingClient(t)
+			oldToken := pairApprovedOverHTTP(t, s.URL, b, "device-1", "Pixel 8")
+			otherToken := pairApprovedOverHTTP(t, s.URL, b, "device-2", "Tablet")
+			devicesBefore, _ := b.Snapshot()
+			notified := make(chan pair.RequestInfo, 1)
+			b.OnRequest(func(req pair.RequestInfo) { notified <- req })
+
+			resp := postPairRequestAuth(t, s.URL, `{"id":"device-1","name":"Pixel 8 Pro"}`, tc.auth(oldToken, otherToken))
+			if resp.StatusCode != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202", resp.StatusCode)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			requestID, _ := body["requestId"].(string)
+			if _, hasToken := body["token"]; hasToken || requestID == "" {
+				t.Fatalf("pending body = %v; want requestId and no token", body)
+			}
+			if !b.Validate(oldToken) || !b.Validate(otherToken) {
+				t.Fatal("tokens must stay valid until the request is approved")
+			}
+			devices, requests := b.Snapshot()
+			if len(requests) != 1 || requests[0].RequestID != requestID || requests[0].ID != "device-1" || requests[0].Name != "Pixel 8 Pro" {
+				t.Fatalf("pending requests = %+v", requests)
+			}
+			if len(devices) != 2 {
+				t.Fatalf("devices before approval = %+v", devices)
+			}
+			select {
+			case got := <-notified:
+				if got.RequestID != requestID || got.ID != "device-1" {
+					t.Fatalf("notification = %+v", got)
+				}
+			default:
+				t.Fatal("pending re-pair did not notify the PC")
+			}
+			status, statusResp := getPairStatus(t, s.URL, requestID)
+			if statusResp.StatusCode != http.StatusOK || status.State != pair.StatePending || status.Token != "" {
+				t.Fatalf("pending status = %+v, HTTP %d", status, statusResp.StatusCode)
+			}
+
+			if err := b.Approve(requestID); err != nil {
+				t.Fatal(err)
+			}
+			status, statusResp = getPairStatus(t, s.URL, requestID)
+			if statusResp.StatusCode != http.StatusOK || status.State != pair.StateApproved || status.Token == "" {
+				t.Fatalf("approved status = %+v, HTTP %d", status, statusResp.StatusCode)
+			}
+			again, _ := getPairStatus(t, s.URL, requestID)
+			if again.Token != "" {
+				t.Fatal("approval token must be returned once")
+			}
+			if b.Validate(oldToken) || !b.Validate(status.Token) || !b.Validate(otherToken) {
+				t.Fatal("approval must replace device-1's token only")
+			}
+			devices, requests = b.Snapshot()
+			if len(devices) != 2 || len(requests) != 0 {
+				t.Fatalf("after approval devices=%+v requests=%+v; want same two devices", devices, requests)
+			}
+			if d := devices[0]; d.ID != "device-1" || d.Name != "Pixel 8 Pro" || d.IP != "127.0.0.1" || !d.FirstApproved.Equal(devicesBefore[0].FirstApproved) {
+				t.Fatalf("updated device = %+v, before = %+v", d, devicesBefore[0])
+			}
+		})
+	}
+}
+
+// S2: a new device stays pending even when it presents some valid token.
+func TestPairNewDeviceWithAnotherDevicesTokenIsPending(t *testing.T) {
+	s, b := newPairingClient(t)
+	otherToken := pairApprovedOverHTTP(t, s.URL, b, "device-2", "Tablet")
+	resp := postPairRequestAuth(t, s.URL, `{"id":"device-new","name":"Pixel 8"}`, "Bearer "+otherToken)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+	requestID, token := decodePairResponse(t, resp)
+	if requestID == "" || token != "" {
+		t.Fatalf("pending response requestId=%q token=%q", requestID, token)
 	}
 }
 
@@ -149,9 +288,86 @@ func TestPairUnknownPendingThenApprovedTokenOnceAndCrossIPForbidden(t *testing.T
 	}
 }
 
+// decodeJSONMap decodes a whole response body into a generic map so tests can
+// assert the exact set of JSON fields.
+func decodeJSONMap(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func assertJSONFields(t *testing.T, what string, got, want map[string]any) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s body = %v, want %v", what, got, want)
+	}
+}
+
+// S2: every /pair/request (200 and 202) and /pair/status body carries
+// "protocol":1 next to its existing fields.
+func TestPairBodiesCarryProtocol(t *testing.T) {
+	now := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	b := pair.NewBrokerWithClock(func() time.Time { return now })
+	client := directPairingClient(t, b)
+	const ip = "192.0.2.10"
+
+	resp := client.do(http.MethodPost, "/pair/request", `{"id":"device-1","name":"Pixel 8"}`, ip)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("request HTTP status = %d, want 202", resp.StatusCode)
+	}
+	pending := decodeJSONMap(t, resp)
+	requestID, _ := pending["requestId"].(string)
+	if requestID == "" {
+		t.Fatalf("202 body = %v, want a requestId", pending)
+	}
+	assertJSONFields(t, "202 /pair/request", pending, map[string]any{"requestId": requestID, "protocol": float64(1)})
+
+	resp = client.do(http.MethodGet, "/pair/status?id="+requestID, "", ip)
+	assertJSONFields(t, "pending /pair/status", decodeJSONMap(t, resp), map[string]any{"state": "pending", "protocol": float64(1)})
+
+	if err := b.Approve(requestID); err != nil {
+		t.Fatal(err)
+	}
+	resp = client.do(http.MethodGet, "/pair/status?id="+requestID, "", ip)
+	approved := decodeJSONMap(t, resp)
+	token, _ := approved["token"].(string)
+	if token == "" {
+		t.Fatalf("approved body = %v, want a token", approved)
+	}
+	assertJSONFields(t, "approved /pair/status", approved, map[string]any{"state": "approved", "token": token, "protocol": float64(1)})
+
+	req := httptest.NewRequest(http.MethodPost, "/pair/request", strings.NewReader(`{"id":"device-1","name":"Pixel 8"}`))
+	req.RemoteAddr = ip + ":12345"
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	client.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("known request HTTP status = %d, want 200", rec.Code)
+	}
+	known := decodeJSONMap(t, rec.Result())
+	rotated, _ := known["token"].(string)
+	if rotated == "" || rotated == token {
+		t.Fatalf("200 body = %v, want a rotated token", known)
+	}
+	assertJSONFields(t, "200 /pair/request", known, map[string]any{"token": rotated, "protocol": float64(1)})
+
+	resp = client.do(http.MethodPost, "/pair/request", `{"id":"device-2","name":"Tablet"}`, ip)
+	second, _ := decodeJSONMap(t, resp)["requestId"].(string)
+	now = now.Add(pair.PendingTTL)
+	resp = client.do(http.MethodGet, "/pair/status?id="+second, "", ip)
+	if resp.StatusCode != http.StatusGone {
+		t.Fatalf("expired HTTP status = %d, want 410", resp.StatusCode)
+	}
+	assertJSONFields(t, "expired /pair/status", decodeJSONMap(t, resp), map[string]any{"state": "expired", "protocol": float64(1)})
+}
+
 func TestPairStatusExpiresAtNinetySeconds(t *testing.T) {
 	now := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
-	t.Setenv("CLIPBOARD_SHARE_STATE", filepath.Join(t.TempDir(), "state.json"))
+	t.Setenv("NUDGE_STATE", filepath.Join(t.TempDir(), "state.json"))
 	b := pair.NewBrokerWithClock(func() time.Time { return now })
 	client := directPairingClient(t, b)
 	resp := client.do(http.MethodPost, "/pair/request", `{"id":"device-1","name":"Pixel 8"}`, "192.0.2.10")

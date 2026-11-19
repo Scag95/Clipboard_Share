@@ -1,0 +1,299 @@
+name: release
+
+# Builds the three release files (Arch package, Windows zip, signed APK) and,
+# for a pushed `v*` tag, publishes the GitHub release with SHA256SUMS and the
+# notes of that version from CHANGELOG.md.
+#
+# Manual run (Actions > release > Run workflow): builds everything from the
+# selected branch and uploads the files as workflow artifacts; it never
+# creates or edits a release. With dry_run=true (the default) the signing
+# secrets are not used and the APK is unsigned; with dry_run=false the APK
+# must be signed, as on a tag.
+#
+# Pull requests that touch the release inputs get the same build-only run
+# (never with the signing secrets, so the APK is unsigned), so a broken
+# release build is caught before tagging.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "pkgbuild/**"
+      - "scripts/build-windows.sh"
+      - "packaging/windows/**"
+      - "android/**"
+      - "cmd/server/version.go"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build only (artifacts, no release); allow an unsigned APK"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.versions.outputs.version }}
+      pkgver: ${{ steps.versions.outputs.pkgver }}
+      pkgrel: ${{ steps.versions.outputs.pkgrel }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versions agree
+        id: versions
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          server="$(sed -nE 's/^const Version = "([^"]+)"$/\1/p' cmd/server/version.go)"
+          android="$(sed -nE 's/^[[:space:]]*versionName = "([^"]+)"$/\1/p' android/app/build.gradle.kts)"
+          pkgver="$(sed -nE 's/^pkgver=([^[:space:]]+)$/\1/p' pkgbuild/PKGBUILD)"
+          pkgrel="$(sed -nE 's/^pkgrel=([^[:space:]]+)$/\1/p' pkgbuild/PKGBUILD)"
+          echo "cmd/server/version.go Version:        ${server:-<missing>}"
+          echo "android/app/build.gradle.kts versionName: ${android:-<missing>}"
+          echo "pkgbuild/PKGBUILD pkgver/pkgrel:      ${pkgver:-<missing>}/${pkgrel:-<missing>}"
+          if [ "$EVENT" = push ]; then
+            version="${REF_NAME#v}"
+            echo "tag $REF_NAME -> version $version"
+          else
+            version="$server"
+            echo "manual run: checking the versions in the tree against $version"
+          fi
+          # pkgver cannot contain '-': 1.0.0-rc1 is written 1.0.0_rc1 there.
+          want_pkgver="${version//-/_}"
+          fail=0
+          if [ -z "$version" ]; then echo "::error::empty version"; fail=1; fi
+          if [ "$server" != "$version" ]; then
+            echo "::error file=cmd/server/version.go::Version is '$server', expected '$version'"; fail=1
+          fi
+          if [ "$android" != "$version" ]; then
+            echo "::error file=android/app/build.gradle.kts::versionName is '$android', expected '$version'"; fail=1
+          fi
+          if [ "$pkgver" != "$want_pkgver" ]; then
+            echo "::error file=pkgbuild/PKGBUILD::pkgver is '$pkgver', expected '$want_pkgver'"; fail=1
+          fi
+          if [ -z "$pkgrel" ]; then echo "::error file=pkgbuild/PKGBUILD::pkgrel missing"; fail=1; fi
+          if [ "$fail" -ne 0 ]; then
+            echo "Version mismatch: bump the three versions to $version (see docs/development.md, Publicar una versión)." >&2
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "pkgver=$pkgver"
+            echo "pkgrel=$pkgrel"
+          } >> "$GITHUB_OUTPUT"
+
+  arch:
+    needs: check
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      PKGFILE: nudge-${{ needs.check.outputs.pkgver }}-${{ needs.check.outputs.pkgrel }}-x86_64.pkg.tar.zst
+    steps:
+      - name: Install build tools
+        run: pacman -Syu --noconfirm --needed base-devel git go
+      - uses: actions/checkout@v4
+      - name: Install the PKGBUILD dependencies
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          mapfile -t deps < <(bash -c 'source pkgbuild/PKGBUILD; printf "%s\n" "${depends[@]}" "${makedepends[@]}"')
+          pacman -S --noconfirm --needed "${deps[@]}"
+          # No nudge-debug package for the release.
+          sed -i -E '/^OPTIONS=/ s/([( ])debug([ )])/\1!debug\2/' /etc/makepkg.conf
+          grep '^OPTIONS=' /etc/makepkg.conf
+      - name: makepkg (non-root)
+        run: |
+          set -euo pipefail
+          useradd -m builder
+          chown -R builder: "$GITHUB_WORKSPACE"
+          cd pkgbuild
+          su builder -c 'makepkg -f'
+          ls -l ./*.pkg.tar.zst
+          test -f "$PKGFILE"
+          mkdir -p ../out
+          cp "$PKGFILE" ../out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nudge-arch
+          path: out/${{ env.PKGFILE }}
+          if-no-files-found: error
+
+  windows-zip:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q librsvg2-bin imagemagick zip
+          # Ubuntu ships ImageMagick 6 (convert); the script calls IM7's magick.
+          command -v magick || sudo ln -s "$(command -v convert)" /usr/local/bin/magick
+      - run: scripts/build-windows.sh "$VERSION"
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nudge-windows-zip
+          path: dist/nudge-${{ needs.check.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+
+  apk:
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      # A tag, or a manual run with dry_run=false, requires a signed APK.
+      # (Compare the event explicitly: on a pull request inputs.dry_run is
+      # null, and null == false is true in GitHub expressions.)
+      STRICT: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: Signing keystore
+        id: keystore
+        env:
+          # The signing secrets reach the job only on strict runs (a pushed tag,
+          # or a manual run with dry_run=false). Pull requests, even from
+          # branches of this repository, and dry runs never see them, so
+          # unreviewed build code can never read the release key.
+          NUDGE_KEYSTORE_B64: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) && secrets.NUDGE_KEYSTORE_B64 || '' }}
+          NUDGE_KEYSTORE_PASSWORD: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) && secrets.NUDGE_KEYSTORE_PASSWORD || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$STRICT" != true ]; then
+            echo "::notice::build-only run: building an UNSIGNED APK (the signing secrets are not used here)"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$NUDGE_KEYSTORE_B64" ] || [ -z "$NUDGE_KEYSTORE_PASSWORD" ]; then
+            if [ "$STRICT" = true ]; then
+              echo "::error::signing secrets not configured (required: NUDGE_KEYSTORE_B64 and NUDGE_KEYSTORE_PASSWORD; NUDGE_KEY_PASSWORD only if the key has its own password)"
+              exit 1
+            fi
+            echo "::warning::signing secrets not configured: dry run, building an UNSIGNED APK"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          ks="$RUNNER_TEMP/nudge-release.jks"
+          printf '%s' "$NUDGE_KEYSTORE_B64" | base64 -d > "$ks"
+          echo "NUDGE_KEYSTORE=$ks" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - name: assembleRelease
+        working-directory: android
+        env:
+          SIGNED: ${{ steps.keystore.outputs.signed }}
+          NUDGE_KEYSTORE_PASSWORD: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) && secrets.NUDGE_KEYSTORE_PASSWORD || '' }}
+          SECRET_KEY_PASSWORD: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) && secrets.NUDGE_KEY_PASSWORD || '' }}
+          NUDGE_KEY_ALIAS: nudge
+        run: |
+          set -euo pipefail
+          if [ "$SIGNED" = true ]; then
+            # An empty key password falls back to the keystore password.
+            if [ -n "$SECRET_KEY_PASSWORD" ]; then export NUDGE_KEY_PASSWORD="$SECRET_KEY_PASSWORD"; fi
+          else
+            unset NUDGE_KEYSTORE NUDGE_KEYSTORE_PASSWORD
+          fi
+          ./gradlew --no-daemon assembleRelease
+          ls -l app/build/outputs/apk/release/
+      - name: Verify and name the APK
+        env:
+          SIGNED: ${{ steps.keystore.outputs.signed }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          if [ "$SIGNED" = true ]; then
+            apk=android/app/build/outputs/apk/release/app-release.apk
+            build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+            "$build_tools/apksigner" verify --print-certs "$apk"
+            cp "$apk" "out/nudge-$VERSION.apk"
+          else
+            cp android/app/build/outputs/apk/release/app-release-unsigned.apk "out/nudge-$VERSION-unsigned.apk"
+            echo "::notice::dry run: nudge-$VERSION-unsigned.apk is NOT signed and cannot be installed as is"
+          fi
+          ls -l out
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nudge-release.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nudge-apk
+          path: out/*.apk
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [check, arch, windows-zip, apk]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: files
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: files
+        run: |
+          set -euo pipefail
+          ls -l
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 3
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Release notes from CHANGELOG.md
+        run: |
+          set -euo pipefail
+          # The section between "## [<version>]" and the next "## [" (or the
+          # link references at the bottom).
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { on = 1; next }
+            on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
+            on { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          # Relative links only work inside the repository: point them at the
+          # files of this tag (and in-page anchors at CHANGELOG.md).
+          base="https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}"
+          sed -i -E \
+            -e "s#\]\(\##](${base}/CHANGELOG.md\##g" \
+            -e "s#\]\((\./)?([A-Za-z0-9_./-]+\.(md|txt)(\#[^)]*)?)\)#](${base}/\2)#g" \
+            "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::error file=CHANGELOG.md::no '## [$VERSION]' section (or it is empty)"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prerelease=()
+          case "$TAG" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$TAG" files/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Nudge $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "${prerelease[@]}"

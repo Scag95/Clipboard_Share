@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ClipboardShare"
+rootProject.name = "nudge"
 include(":app")

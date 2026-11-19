@@ -146,6 +146,34 @@ private slots:
         QCOMPARE(server.commands.first().value("cmd").toString(), QString("list"));
     }
 
+    // S5: the server's verification code comes with every list and goes away
+    // with the server.
+    void listCarriesTheVerificationCode() {
+        auto server = std::make_unique<FakeServer>(m_path);
+        server->code = "6B86-B273-FF34";
+        server->fingerprint = "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b";
+        Backend backend(m_path, 0);
+        QSignalSpy changed(&backend, &Backend::changed);
+        QCOMPARE(backend.code(), QString());
+
+        backend.refresh();
+        QVERIFY(waitChanged(changed));
+        QCOMPARE(backend.code(), QString("6B86-B273-FF34"));
+
+        // A changed code alone is a change worth announcing.
+        server->code = "AAAA-BBBB-CCCC";
+        backend.refresh();
+        QVERIFY(waitChanged(changed, 2));
+        QCOMPARE(backend.code(), QString("AAAA-BBBB-CCCC"));
+
+        server.reset();
+        QLocalServer::removeServer(m_path);
+        backend.refresh();
+        QVERIFY(waitChanged(changed, 3));
+        QVERIFY(!backend.online());
+        QCOMPARE(backend.code(), QString());
+    }
+
     void missingSocketReportsOfflineWithTheSocketPath() {
         Backend backend(m_dir.filePath("nope.sock"), 0);
         QSignalSpy changed(&backend, &Backend::changed);
@@ -355,44 +383,26 @@ private slots:
 
     void socketPathHonorsTheEnvironmentOverride() {
         ScopedEnv fresh("NUDGE_CTL_SOCK", "/tmp/nudge-ctl.sock");
-        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/custom-ctl.sock");
         Backend backend;
         QCOMPARE(backend.socketPath(), QString("/tmp/nudge-ctl.sock"));
     }
 
-    void socketPathFallsBackToTheOldEnvironmentName() {
-        ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
-        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/custom-ctl.sock");
-        Backend backend;
-        QCOMPARE(backend.socketPath(), QString("/tmp/custom-ctl.sock"));
-    }
-
-    // S9: the effective config dir, and the panel never moves or creates it.
-    void theEffectiveConfigDirectoryFollowsTheSharedRule_data() {
+    // S9: the config dir is ~/.config/nudge, and the panel never creates it.
+    void theConfigDirectoryIsNudge_data() {
         QTest::addColumn<bool>("withNudge");
-        QTest::addColumn<bool>("withLegacy");
-        QTest::addColumn<QString>("expected");
-        QTest::newRow("neither") << false << false << "home/.config/nudge/ctl.sock";
-        QTest::newRow("only nudge") << true << false << "home/.config/nudge/ctl.sock";
-        QTest::newRow("only legacy") << false << true << "home/.config/clipboard-share/ctl.sock";
-        QTest::newRow("both") << true << true << "home/.config/nudge/ctl.sock";
+        QTest::newRow("absent") << false;
+        QTest::newRow("present") << true;
     }
 
-    void theEffectiveConfigDirectoryFollowsTheSharedRule() {
+    void theConfigDirectoryIsNudge() {
         QFETCH(bool, withNudge);
-        QFETCH(bool, withLegacy);
-        QFETCH(QString, expected);
+        const QString expected = "home/.config/nudge/ctl.sock";
         ScopedEnv home("HOME", sandbox("home").toUtf8());
         ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
-        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
         QVERIFY(QDir().mkpath(sandbox("home/.config")));
         if (withNudge) {
             QVERIFY(QDir().mkpath(sandbox("home/.config/nudge")));
             QVERIFY(writeFile(sandbox("home/.config/nudge/state.json"), "new"));
-        }
-        if (withLegacy) {
-            QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
-            QVERIFY(writeFile(sandbox("home/.config/clipboard-share/state.json"), "old"));
         }
 
         Backend backend({}, 0);
@@ -403,22 +413,17 @@ private slots:
         QCOMPARE(backend.socketPath(), sandbox(expected));
         QVERIFY2(backend.error().contains(sandbox(expected)), qPrintable(backend.error()));
         QCOMPARE(QFileInfo::exists(sandbox("home/.config/nudge")), withNudge);
-        QCOMPARE(QFileInfo::exists(sandbox("home/.config/clipboard-share")), withLegacy);
         if (withNudge)
             QCOMPARE(readFile(sandbox("home/.config/nudge/state.json")), QByteArray("new"));
-        if (withLegacy)
-            QCOMPARE(readFile(sandbox("home/.config/clipboard-share/state.json")), QByteArray("old"));
     }
 
-    // The panel's whole startup path leaves the legacy directory as it is and
-    // creates no ~/.config/nudge: only the server migrates.
-    void theStartupPathNeverTouchesTheLegacyDirectory() {
+    // The panel's whole startup path creates no ~/.config/nudge: only the
+    // server does.
+    void theStartupPathNeverCreatesTheConfigDirectory() {
         ScopedEnv home("HOME", sandbox("home").toUtf8());
         ScopedEnv state("XDG_STATE_HOME", sandbox("xdg-state").toUtf8());
         ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
-        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
-        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
-        QVERIFY(writeFile(sandbox("home/.config/clipboard-share/state.json"), "{\"devices\":[1]}"));
+        QVERIFY(QDir().mkpath(sandbox("home/.config")));
         FakeSystemctl systemctl;
         systemctl.enabled = false;
 
@@ -432,49 +437,15 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(systemctl.count({"start", Autostart::Unit}), 1, 2000);
 
         QVERIFY(!QFileInfo::exists(sandbox("home/.config/nudge")));
-        QCOMPARE(readFile(sandbox("home/.config/clipboard-share/state.json")), QByteArray("{\"devices\":[1]}"));
-        QCOMPARE(QDir(sandbox("home/.config/clipboard-share")).entryList(QDir::NoDotAndDotDot | QDir::AllEntries),
-                 QStringList{"state.json"});
         QVERIFY(QFileInfo::exists(sandbox("xdg-state/nudge-panel/autostart-defaults-applied")));
     }
 
-    // After the server moves the old directory, the next exchange uses the
-    // socket in the new one.
-    void theSocketPathFollowsTheServersMigration() {
+    // The override wins, resolved at each use.
+    void theSocketOverrideWinsOverTheConfigDirectory() {
         ScopedEnv home("HOME", sandbox("home").toUtf8());
         ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
-        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
-        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
-        auto server = std::make_unique<FakeServer>(sandbox("home/.config/clipboard-share/ctl.sock"));
-        server->devices = {device("d1", "Galaxy", "192.168.0.20")};
         Backend backend({}, 0);
-        backend.refresh();
-        QTRY_VERIFY_WITH_TIMEOUT(backend.online(), 2000);
-        QCOMPARE(backend.socketPath(), sandbox("home/.config/clipboard-share/ctl.sock"));
-
-        // What the server does at startup.
-        server.reset();
-        QVERIFY(QDir().rename(sandbox("home/.config/clipboard-share"), sandbox("home/.config/nudge")));
-        server = std::make_unique<FakeServer>(sandbox("home/.config/nudge/ctl.sock"));
-        server->devices = {device("d2", "Pixel", "192.168.0.21")};
-        backend.refresh();
-
-        QTRY_COMPARE_WITH_TIMEOUT(commandCount(*server, "list"), 1, 2000);
-        QTRY_COMPARE_WITH_TIMEOUT(backend.devices().value(0).toMap().value("name").toString(), QString("Pixel"), 2000);
-        QVERIFY(backend.online());
         QCOMPARE(backend.socketPath(), sandbox("home/.config/nudge/ctl.sock"));
-    }
-
-    // The overrides still win, resolved at each use too.
-    void theSocketOverridesWinOverTheConfigDirectory() {
-        ScopedEnv home("HOME", sandbox("home").toUtf8());
-        ScopedEnv fresh("NUDGE_CTL_SOCK", QByteArray());
-        ScopedEnv old("CLIPBOARD_SHARE_CTL_SOCK", QByteArray());
-        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
-        Backend backend({}, 0);
-        QCOMPARE(backend.socketPath(), sandbox("home/.config/clipboard-share/ctl.sock"));
-        qputenv("CLIPBOARD_SHARE_CTL_SOCK", "/tmp/custom-ctl.sock");
-        QCOMPARE(backend.socketPath(), QString("/tmp/custom-ctl.sock"));
         qputenv("NUDGE_CTL_SOCK", "/tmp/nudge-ctl.sock");
         QCOMPARE(backend.socketPath(), QString("/tmp/nudge-ctl.sock"));
     }
@@ -816,22 +787,6 @@ private slots:
         QVERIFY(second->state() == QProcess::Running);
     }
 
-    // The real binary with only the legacy directory and no socket override:
-    // it uses the old socket and leaves the directory alone.
-    void aLaunchedPanelLeavesTheLegacyDirectoryAlone() {
-        QVERIFY(QDir().mkpath(sandbox("home/.config/clipboard-share")));
-        QVERIFY(writeFile(sandbox("home/.config/clipboard-share/state.json"), "{\"devices\":[1]}"));
-        QProcess *panel = startPanel(false);
-        QTRY_VERIFY_WITH_TIMEOUT(systemctlLog().contains("--user start nudge.service"), 10000);
-        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(markerPath()), 10000);
-        QVERIFY(panel->state() == QProcess::Running);
-
-        QVERIFY(!QFileInfo::exists(sandbox("home/.config/nudge")));
-        QCOMPARE(QDir(sandbox("home/.config/clipboard-share")).entryList(QDir::NoDotAndDotDot | QDir::AllEntries),
-                 QStringList{"state.json"});
-        QCOMPARE(readFile(sandbox("home/.config/clipboard-share/state.json")), QByteArray("{\"devices\":[1]}"));
-    }
-
     // Single instance, driven through the built panel binary, offscreen and
     // isolated: its own runtime, temp and home directories, no session bus, and
     // a control socket nobody serves.
@@ -964,7 +919,6 @@ private:
             env.insert("NUDGE_CTL_SOCK", sandbox("absent-ctl.sock"));
         else
             env.remove("NUDGE_CTL_SOCK");
-        env.remove("CLIPBOARD_SHARE_CTL_SOCK");
         env.insert("PATH", sandbox("bin") + ":" + env.value("PATH"));
 
         auto *process = new QProcess;

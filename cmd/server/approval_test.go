@@ -38,7 +38,7 @@ func newApprovalBroker(t *testing.T) (*pair.Broker, *fakeClock) {
 
 func requestPairing(t *testing.T, b *pair.Broker, id, name, ip string) pair.RequestInfo {
 	t.Helper()
-	res, err := b.Request(id, name, ip)
+	res, err := b.Request(id, name, ip, "")
 	if err != nil {
 		t.Fatalf("Request(%s): %v", id, err)
 	}
@@ -89,7 +89,7 @@ func TestSanitizeDialogField(t *testing.T) {
 }
 
 func TestApprovalTextIsSpanishWithSanitizedNameAndIP(t *testing.T) {
-	text := approvalText(pair.RequestInfo{Name: "Pixel\n8\x00 de Ana", IP: "192.168.1.20"})
+	text := approvalText(pair.RequestInfo{Name: "Pixel\n8\x00 de Ana", IP: "192.168.1.20"}, "6B86-B273-FF34")
 	for _, want := range []string{"Pixel 8 de Ana", "192.168.1.20", "emparejar", "¿Permitir"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("approval text %q does not contain %q", text, want)
@@ -98,20 +98,21 @@ func TestApprovalTextIsSpanishWithSanitizedNameAndIP(t *testing.T) {
 	if strings.ContainsRune(text, 0) {
 		t.Errorf("approval text contains NUL: %q", text)
 	}
-	long := approvalText(pair.RequestInfo{Name: strings.Repeat("N", 200), IP: "10.0.0.1"})
+	long := approvalText(pair.RequestInfo{Name: strings.Repeat("N", 200), IP: "10.0.0.1"}, "6B86-B273-FF34")
 	if strings.Contains(long, strings.Repeat("N", 41)) {
 		t.Errorf("long name not truncated: %q", long)
 	}
-	empty := approvalText(pair.RequestInfo{Name: "\x01", IP: "10.0.0.1"})
+	empty := approvalText(pair.RequestInfo{Name: "\x01", IP: "10.0.0.1"}, "6B86-B273-FF34")
 	if !strings.Contains(empty, "(sin nombre)") {
 		t.Errorf("empty name placeholder missing: %q", empty)
 	}
 }
 
 func TestApprovalTextFullWordingUsesVoseo(t *testing.T) {
-	got := approvalText(pair.RequestInfo{Name: "Pixel 8 de Ana", IP: "192.168.1.20"})
+	got := approvalText(pair.RequestInfo{Name: "Pixel 8 de Ana", IP: "192.168.1.20"}, "6B86-B273-FF34")
 	want := "Un teléfono quiere emparejarse con este equipo.\n\n" +
-		"Nombre: Pixel 8 de Ana\nIP: 192.168.1.20\n\n" +
+		"Nombre: Pixel 8 de Ana\nIP: 192.168.1.20\nCódigo: 6B86-B273-FF34\n\n" +
+		"Comprobá que el teléfono muestre el mismo código.\n\n" +
 		"¿Permitir que controle el portapapeles, el ratón y el teclado de este equipo?\n\n" +
 		"Si no reconocés este dispositivo, elegí No."
 	if got != want {
@@ -131,6 +132,7 @@ func TestApprovalDialogYesApprovesAndNoDenies(t *testing.T) {
 	}
 	for _, c := range cases {
 		b, _ := newApprovalBroker(t)
+		b.SetVerification("6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b", "6B86-B273-FF34")
 		req := requestPairing(t, b, "dev", "Pixel", "10.0.0.2")
 		var shown []string
 		q := newApprovalQueue(b, func(title, text string) int {
@@ -140,6 +142,9 @@ func TestApprovalDialogYesApprovesAndNoDenies(t *testing.T) {
 		q.handle(req)
 		if len(shown) != 1 || !strings.HasPrefix(shown[0], "Nudge|") {
 			t.Fatalf("answer %d: shown = %q, want one dialog titled Nudge", c.answer, shown)
+		}
+		if !strings.Contains(shown[0], "\nCódigo: 6B86-B273-FF34\n") {
+			t.Fatalf("answer %d: dialog %q does not show the broker's verification code", c.answer, shown[0])
 		}
 		if got := len(pendingIDs(b)); got != 0 {
 			t.Fatalf("answer %d: %d requests still pending, want resolved", c.answer, got)

@@ -20,6 +20,9 @@ class Backend : public QObject {
     Q_PROPERTY(QString message READ message NOTIFY changed)
     Q_PROPERTY(QVariantList requests READ requests NOTIFY changed)
     Q_PROPERTY(QVariantList devices READ devices NOTIFY changed)
+    // The server certificate's verification code (XXXX-XXXX-XXXX) from `list`;
+    // empty while offline. The phone shows the same code when pairing.
+    Q_PROPERTY(QString code READ code NOTIFY changed)
     Q_PROPERTY(QString hostName READ hostName CONSTANT)
     Q_PROPERTY(QString socketPath READ socketPath NOTIFY changed)
 
@@ -34,6 +37,7 @@ public:
     QString message() const { return m_message; }
     QVariantList requests() const { return m_requests; }
     QVariantList devices() const { return m_devices; }
+    QString code() const { return m_code; }
     QString hostName() const;
     QString socketPath() const;
 
@@ -59,12 +63,13 @@ private:
         bool online;
         QString error, message;
         QVariantList requests, devices;
+        QString code;
         bool operator!=(const State &other) const {
             return online != other.online || error != other.error || message != other.message ||
-                   requests != other.requests || devices != other.devices;
+                   requests != other.requests || devices != other.devices || code != other.code;
         }
     };
-    State state() const { return {m_online, m_error, m_message, m_requests, m_devices}; }
+    State state() const { return {m_online, m_error, m_message, m_requests, m_devices, m_code}; }
 
     // Empty when the path is resolved at each use.
     QString m_fixedSocketPath;
@@ -78,5 +83,6 @@ private:
     bool m_errorFromAction = false;
     QString m_message;
     QVariantList m_requests, m_devices;
+    QString m_code;
     QSet<QString> m_seenRequests;
 };

@@ -1,14 +1,19 @@
-# App de Android (beta personal)
+# App de Android
 
 La app descubre el PC en la red, sincroniza el clipboard en los dos sentidos y
-hace de trackpad y teclado remoto. Es una beta de uso personal: APK con firma
-debug, instalada a mano, sin Play Store.
+hace de trackpad y teclado remoto. Se distribuye como APK firmado en las
+releases de GitHub (id de la app: `com.scag95.nudge`), sin Play Store.
 
 ## Instalar
 
-Hay un APK ya compilado (`nudge-<versión>-debug.apk`) en la
-[página de releases](https://github.com/Scag95/Nudge/releases). También podés
-instalarlo por USB con `adb`, o con `adb connect` por Wi-Fi.
+Bajá el APK de la
+[página de releases](https://github.com/Scag95/Nudge/releases) e instalalo (o
+con `adb install`). Las actualizaciones se instalan encima porque vienen
+firmadas con la misma clave.
+
+**Si tenías la 0.1.0:** esa versión era otra app para Android (otro id y
+firma debug). Desinstalala, instalá la nueva y volvé a emparejar el teléfono
+con la PC.
 
 ## Generar el APK
 
@@ -20,6 +25,19 @@ cd android
 ./gradlew assembleDebug
 # salida: app/build/outputs/apk/debug/app-debug.apk (firma debug)
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+El APK de release se firma con la clave del proyecto, que nunca está en el
+repositorio: Gradle la toma de variables de entorno. Sin `NUDGE_KEYSTORE` sale
+un APK sin firmar (nunca se usa la clave debug).
+
+```bash
+export NUDGE_KEYSTORE=~/keys/nudge-release.jks   # ruta al .jks
+export NUDGE_KEY_ALIAS=nudge                     # por defecto: nudge
+read -rs NUDGE_KEYSTORE_PASSWORD && export NUDGE_KEYSTORE_PASSWORD
+# NUDGE_KEY_PASSWORD solo si la clave tiene otra contraseña que el keystore
+cd android && ./gradlew assembleRelease
+# salida: app/build/outputs/apk/release/app-release.apk
 ```
 
 Para trabajar en la app con Android Studio:
@@ -51,8 +69,8 @@ permisos que Android no deja pedir desde la interfaz. Se hace una vez, con el
 celu conectado por `adb`:
 
 ```bash
-adb shell pm grant com.clipboardshare android.permission.READ_LOGS
-adb shell appops set com.clipboardshare SYSTEM_ALERT_WINDOW allow
+adb shell pm grant com.scag95.nudge android.permission.READ_LOGS
+adb shell appops set com.scag95.nudge SYSTEM_ALERT_WINDOW allow
 ```
 
 Además Android muestra, al abrir la app, el diálogo **"¿Permitir que Nudge
