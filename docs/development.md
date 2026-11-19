@@ -33,12 +33,11 @@ Nudge/
 ├── android/           # app Android (Kotlin)
 ├── panel/             # panel de escritorio Linux (C++ / Qt Quick) y sus tests
 ├── pkgbuild/          # paquete Arch `nudge`, servicio de usuario, launcher, ícono
-├── odd/tasks/         # especificaciones de cada funcionalidad
+├── packaging/windows/ # instalador por usuario, scripts y recursos del .exe
+├── scripts/           # build-windows.sh: zip de Windows
+├── docs/              # documentación por plataforma y de desarrollo
 └── README.md
 ```
-
-Las especificaciones del control remoto y del emparejamiento están en
-`odd/tasks/input-control.md` y `odd/tasks/transparent-pairing.md`.
 
 ## Requisitos del servidor
 
@@ -175,5 +174,3 @@ y sobrevive reinicios del servidor y del PC.
 - El sync celu → PC depende del texto de un log del sistema de Android y de un
   diálogo de consentimiento que solo el usuario puede aceptar.
 - La regla udev `uaccess` no está verificada.
-- Los hallazgos no bloqueantes de los reviews están en
-  `odd/tasks/review-followups.md`.

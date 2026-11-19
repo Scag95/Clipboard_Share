@@ -1,8 +1,8 @@
-# Clipboard Share
-
-# Binarios / build
-clipboard-share
+# Build output
+/nudge
 *.exe
+*.syso
+dist/
 
 # Go
 vendor/
@@ -10,9 +10,13 @@ vendor/
 # Android
 android/.gradle/
 android/build/
+android/app/build/
 android/local.properties
 android/*.iml
 android/.idea/
 
-# Release artifacts
-dist/
+# Local working notes and design explorations (kept out of the repository)
+odd/
+design/
+.atl/
+.worktrees/
