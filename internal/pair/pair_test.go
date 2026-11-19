@@ -105,9 +105,7 @@ func TestKnownReissuesTokenAndSurvivesReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("state mode = %o, want 600", got)
-	}
+	assertPerm(t, StatePath(), info, 0o600)
 	data, err := os.ReadFile(StatePath())
 	if err != nil {
 		t.Fatal(err)
@@ -251,9 +249,11 @@ func TestControlSocketCommandsAndTokenPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { control.Close() })
-	if info, err := os.Stat(ControlPath()); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("socket info=%v err=%v, want mode 600", info, err)
+	info, err := os.Stat(ControlPath())
+	if err != nil {
+		t.Fatalf("stat control socket: %v", err)
 	}
+	assertPerm(t, ControlPath(), info, 0o600)
 
 	send := func(cmd string) map[string]any {
 		t.Helper()

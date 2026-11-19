@@ -1,0 +1,166 @@
+name: windows
+
+# Tests the Windows build on real Windows (GitHub-hosted windows-latest):
+# the Go suite, and the release zip end to end (installer, server, control
+# socket CLI, pairing, clipboard, uninstaller).
+on:
+  push:
+    branches: [main, "feat/windows-*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q librsvg2-bin imagemagick zip
+          # Ubuntu ships ImageMagick 6 (convert); the script calls IM7's magick.
+          command -v magick || sudo ln -s "$(command -v convert)" /usr/local/bin/magick
+      - run: scripts/build-windows.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nudge-windows-zip
+          path: dist/*-windows-x64.zip
+
+  smoke:
+    needs: package
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nudge-windows-zip
+          path: zip
+      - name: Extract the release zip
+        run: |
+          $zip = Get-ChildItem zip -Filter *.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath "$env:RUNNER_TEMP\nudge-zip"
+          Get-ChildItem "$env:RUNNER_TEMP\nudge-zip"
+
+      - name: Install through the double-click launcher (Windows PowerShell 5.1)
+        shell: cmd
+        run: |
+          cd /d "%RUNNER_TEMP%\nudge-zip"
+          call "Install Nudge.cmd" -FirewallRule yes -NoPause
+          if errorlevel 1 exit /b 1
+
+      - name: Check the installation
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Nudge'
+          foreach ($f in 'nudge.exe', 'nudge-background.exe', 'nudge.ico') {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f in $dir" }
+          }
+          $startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'Nudge.lnk'
+          if (-not (Test-Path $startup)) { throw "autostart shortcut missing: $startup" }
+          $menu = Get-ChildItem ([Environment]::GetFolderPath('Programs')) -Recurse -Filter 'Nudge.lnk'
+          if (-not $menu) { throw 'Start Menu shortcut missing' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains $dir) { throw "install dir not in user PATH: $userPath" }
+          netsh advfirewall firewall show rule name="Nudge"
+          if ($LASTEXITCODE -ne 0) { throw 'firewall rule "Nudge" missing' }
+          "install OK: $dir"
+
+      - name: Server is running and answering
+        run: |
+          $ok = $false
+          foreach ($i in 1..40) {
+            try { $r = Invoke-RestMethod http://127.0.0.1:8765/health; if ($r.status -eq 'ok') { $ok = $true; break } } catch { }
+            Start-Sleep -Milliseconds 500
+          }
+          if (-not $ok) { throw 'server did not answer /health' }
+          if (-not (Get-Process -Name 'nudge-background' -ErrorAction SilentlyContinue)) { throw 'nudge-background.exe not running' }
+          $cfg = Join-Path $env:APPDATA 'nudge'
+          Get-ChildItem $cfg
+          Get-Content (Join-Path $cfg 'nudge.log')
+          if (-not (Test-Path (Join-Path $cfg 'ctl.sock'))) { throw 'control socket (AF_UNIX) missing' }
+
+      - name: Pair through the control socket CLI
+        run: |
+          $nudge = Join-Path $env:LOCALAPPDATA 'Programs\Nudge\nudge.exe'
+          $body = '{"id":"ci-device","name":"CI Phone"}'
+          $req = Invoke-WebRequest -Method Post -Uri http://127.0.0.1:8765/pair/request -Body $body -ContentType 'application/json'
+          if ($req.StatusCode -ne 202) { throw "pair/request status $($req.StatusCode)" }
+          $id = ($req.Content | ConvertFrom-Json).requestId
+          & $nudge pair list
+          if ($LASTEXITCODE -ne 0) { throw "nudge pair list exit $LASTEXITCODE" }
+          & $nudge pair --last
+          if ($LASTEXITCODE -ne 0) { throw "nudge pair --last exit $LASTEXITCODE" }
+          $st = Invoke-RestMethod "http://127.0.0.1:8765/pair/status?id=$id"
+          if ($st.state -ne 'approved' -or -not $st.token) { throw "pair status: $($st | ConvertTo-Json -Compress)" }
+          'paired OK through the CLI'
+
+      - name: Clipboard round trip
+        run: |
+          try {
+            Add-Type -AssemblyName System.Windows.Forms
+            [System.Windows.Forms.Clipboard]::Clear()
+          } catch { "could not clear the clipboard: $_" }
+          $before = Get-Clipboard -Raw
+          $empty = Invoke-WebRequest http://127.0.0.1:8765/clipboard/text -SkipHttpErrorCheck
+          "empty clipboard -> $($empty.StatusCode) $($empty.Content)"
+          if ($empty.StatusCode -ne 200) { throw 'empty clipboard should be 200 with empty text' }
+          if ([string]::IsNullOrEmpty($before)) {
+            if (($empty.Content | ConvertFrom-Json).text -ne '') { throw 'empty clipboard should read as empty text' }
+          } else { "clipboard was not empty ('$before'); empty-text check skipped" }
+          $text = 'hola desde CI ñ €'
+          $json = @{ text = $text } | ConvertTo-Json -Compress
+          $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+          Invoke-WebRequest -Method Post -Uri http://127.0.0.1:8765/clipboard/text -Body $bytes -ContentType 'application/json; charset=utf-8' | Out-Null
+          $got = (Invoke-RestMethod http://127.0.0.1:8765/clipboard/text).text
+          if ($got -ne $text) { throw "server read back '$got'" }
+          $os = Get-Clipboard -Raw
+          if ($os.TrimEnd("`r", "`n") -ne $text) { throw "Windows clipboard has '$os'" }
+          Set-Clipboard -Value 'puesto por Windows'
+          $got = (Invoke-RestMethod http://127.0.0.1:8765/clipboard/text).text
+          if ($got -ne 'puesto por Windows') { throw "server read '$got' from the Windows clipboard" }
+          'clipboard OK'
+
+      - name: Uninstall through the launcher
+        shell: cmd
+        run: |
+          cd /d "%RUNNER_TEMP%\nudge-zip"
+          call "Uninstall Nudge.cmd" -RemoveData yes -NoPause
+          if errorlevel 1 exit /b 1
+
+      - name: Check the uninstall
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Nudge'
+          if (Test-Path $dir) { throw "install dir still there: $dir" }
+          if (Test-Path (Join-Path $env:APPDATA 'nudge')) { throw 'config dir still there' }
+          if (Test-Path (Join-Path ([Environment]::GetFolderPath('Startup')) 'Nudge.lnk')) { throw 'autostart shortcut still there' }
+          if (Get-ChildItem ([Environment]::GetFolderPath('Programs')) -Recurse -Filter 'Nudge*.lnk') { throw 'Start Menu shortcuts still there' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -contains $dir) { throw 'install dir still in user PATH' }
+          if (Get-Process -Name 'nudge-background' -ErrorAction SilentlyContinue) { throw 'server still running' }
+          netsh advfirewall firewall show rule name="Nudge" | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw 'firewall rule still there' }
+          # netsh failing is the expected result here; do not let its exit
+          # code become the step's.
+          $global:LASTEXITCODE = 0
+          'uninstall OK'
+
+      - name: Server log on failure
+        if: failure()
+        run: Get-Content (Join-Path $env:APPDATA 'nudge\nudge.log') -ErrorAction SilentlyContinue
